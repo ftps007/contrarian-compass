@@ -9,7 +9,7 @@ let cachedPrices: Record<string, Record<string, number>> | null = null;
 // Trade executions: date → tickers that were traded
 const EXECUTIONS = [
   {
-    date: '2026-01-05', // W1 execution
+    date: '2026-01-02', // W1 execution (first trading day 2026)
     tickers: ['HD', 'UNH', 'KO', 'JNJ', 'AMGN', 'VZ'],
   },
   {

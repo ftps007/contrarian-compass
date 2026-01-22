@@ -12,7 +12,7 @@ export const samplePortfolioData = {
     {
       label: 'Week 1',
       calcDate: '2026-01-02',
-      execDate: '2026-01-05',
+      execDate: '2026-01-02',
       periodEnd: '2026-01-09',
       weights: {
         HD: 0.2630,

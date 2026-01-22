@@ -158,7 +158,7 @@ export default function Dashboard() {
     : 0;
 
   // All trades since inception (using execution prices from API)
-  const execDates = ['2026-01-05', '2026-01-12', '2026-01-20'];
+  const execDates = ['2026-01-02', '2026-01-12', '2026-01-20'];
   const allTrades: { week: string; ticker: string; action: string; shares: number; price: number | null }[] = [];
 
   // Week 1: initial buys from positions
