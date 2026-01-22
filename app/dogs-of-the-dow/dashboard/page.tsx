@@ -141,7 +141,7 @@ export default function Dashboard() {
     : 0;
 
   // All trades since inception
-  const allTrades: { week: string; ticker: string; action: string; shares: number; price: number; estimated?: boolean }[] = [];
+  const allTrades: { week: string; ticker: string; action: string; shares: number; price: number }[] = [];
 
   // Week 1: initial buys from positions
   const week1 = data.weeks[0];
@@ -158,10 +158,10 @@ export default function Dashboard() {
     });
   }
 
-  // Week 3: planned trades
+  // Week 3: trades (executed Jan 20)
   if (activeWeek?.plannedTrades) {
     activeWeek.plannedTrades.forEach((t: any) => {
-      allTrades.push({ week: 'W3', ticker: t.ticker, action: t.action, shares: t.shares, price: t.estimatedPrice, estimated: true });
+      allTrades.push({ week: 'W3', ticker: t.ticker, action: t.action, shares: t.shares, price: t.estimatedPrice });
     });
   }
 
@@ -402,16 +402,13 @@ export default function Dashboard() {
                     </td>
                     <td className="py-1.5 px-1 text-white text-sm font-medium">{trade.ticker}</td>
                     <td className="py-1.5 px-1 text-right text-gray-300 text-sm font-mono">
-                      {trade.shares} <span className="text-gray-500">(${trade.price.toFixed(2)}{trade.estimated ? '*' : ''})</span>
+                      {trade.shares} <span className="text-gray-500">(${trade.price.toFixed(2)})</span>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          {activeWeek?.status === 'active' && (
-            <div className="text-gray-600 text-xs mt-2">* estimated price</div>
-          )}
         </div>
 
         {/* Metrics: Sharpe, Beta, CAPM Expected, Actual */}
