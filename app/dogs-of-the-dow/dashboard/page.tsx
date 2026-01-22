@@ -239,9 +239,9 @@ export default function Dashboard() {
                   <th className="text-left text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Ticker</th>
                   <th className="text-left text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Name</th>
                   <th className="text-right text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Shares</th>
-                  <th className="text-right text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Price</th>
+                  <th className="text-right text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Live Price</th>
                   <th className="text-right text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Change</th>
-                  <th className="text-right text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Value</th>
+                  <th className="text-right text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Mkt Value</th>
                   <th className="text-right text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Weight</th>
                 </tr>
               </thead>
