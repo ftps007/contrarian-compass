@@ -371,46 +371,6 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* All Trades */}
-        <div className="px-6 py-4 border-b border-[#252525]">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-gray-400 text-xs uppercase tracking-wider">All Trades</span>
-            <span className="text-gray-500 text-xs">{allTrades.length} trades since inception</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[#333]">
-                  <th className="text-left text-gray-500 text-xs uppercase tracking-wider py-1.5 px-1">Week</th>
-                  <th className="text-left text-gray-500 text-xs uppercase tracking-wider py-1.5 px-1">Action</th>
-                  <th className="text-left text-gray-500 text-xs uppercase tracking-wider py-1.5 px-1">Ticker</th>
-                  <th className="text-right text-gray-500 text-xs uppercase tracking-wider py-1.5 px-1">Shares (Price)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allTrades.map((trade, i) => (
-                  <tr key={i} className="border-b border-[#252525]/40">
-                    <td className="py-1.5 px-1 text-gray-500 text-xs font-mono">{trade.week}</td>
-                    <td className="py-1.5 px-1">
-                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
-                        trade.action === 'BUY'
-                          ? 'bg-[#00D4AA]/15 text-[#00D4AA]'
-                          : 'bg-[#FF6B6B]/15 text-[#FF6B6B]'
-                      }`}>
-                        {trade.action}
-                      </span>
-                    </td>
-                    <td className="py-1.5 px-1 text-white text-sm font-medium">{trade.ticker}</td>
-                    <td className="py-1.5 px-1 text-right text-gray-300 text-sm font-mono">
-                      {trade.shares} <span className="text-gray-500">(${trade.price.toFixed(2)})</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
         {/* Metrics: Sharpe, Beta, CAPM Expected, Actual */}
         <div className="grid grid-cols-4 gap-0 divide-x divide-[#252525]">
           <div className="px-6 py-4 text-center">
@@ -446,6 +406,48 @@ export default function Dashboard() {
             {livePrices?.source === 'fallback_data' && <span className="text-[#FFB800] ml-2">cached</span>}
           </span>
           <span>Market: {livePrices?.marketState || '-'} &middot; Yahoo Finance</span>
+        </div>
+      </div>
+
+      {/* === TRADES === */}
+      <div className="bg-[#1a1a1a] rounded-2xl border border-[#252525] mt-4 overflow-hidden">
+        <div className="flex items-center justify-between px-6 pt-5 pb-3">
+          <h2 className="text-white font-semibold">Trades</h2>
+          <span className="text-gray-500 text-xs">{allTrades.length} trades since inception</span>
+        </div>
+        <div className="px-6 pb-5">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-[#333]">
+                  <th className="text-left text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Week</th>
+                  <th className="text-left text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Action</th>
+                  <th className="text-left text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Ticker</th>
+                  <th className="text-right text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Shares (Exec. Price)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allTrades.map((trade, i) => (
+                  <tr key={i} className="border-b border-[#252525]/40 hover:bg-[#252525]/30 transition-colors">
+                    <td className="py-2 px-1 text-gray-500 text-xs font-mono">{trade.week}</td>
+                    <td className="py-2 px-1">
+                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                        trade.action === 'BUY'
+                          ? 'bg-[#00D4AA]/15 text-[#00D4AA]'
+                          : 'bg-[#FF6B6B]/15 text-[#FF6B6B]'
+                      }`}>
+                        {trade.action}
+                      </span>
+                    </td>
+                    <td className="py-2 px-1 text-white text-sm font-medium">{trade.ticker}</td>
+                    <td className="py-2 px-1 text-right text-gray-300 text-sm font-mono">
+                      {trade.shares} <span className="text-gray-500">(${trade.price.toFixed(2)})</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
