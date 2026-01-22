@@ -53,6 +53,7 @@ export default function Dashboard() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioHistoryEntry[]>([]);
   const [refreshInterval, setRefreshInterval] = useState(900); // 15 min
+  const [execPrices, setExecPrices] = useState<Record<string, Record<string, number>> | null>(null);
 
   const data = samplePortfolioData;
   const latestWeek = data.weeks[1]!;
@@ -123,6 +124,22 @@ export default function Dashboard() {
     }
   }, [fetchLivePrices, autoRefresh, refreshInterval]);
 
+  // Fetch execution prices once
+  useEffect(() => {
+    async function fetchExecPrices() {
+      try {
+        const response = await fetch('/api/execution-prices');
+        const data = await response.json();
+        if (data.prices && Object.keys(data.prices).length > 0) {
+          setExecPrices(data.prices);
+        }
+      } catch (error) {
+        console.error('Failed to fetch execution prices:', error);
+      }
+    }
+    fetchExecPrices();
+  }, []);
+
   // Live portfolio value
   const liveStockValue = livePrices?.prices
     ? (activeWeek?.targetPositions || []).reduce((sum: number, p: any) => {
@@ -140,28 +157,32 @@ export default function Dashboard() {
     ? ((liveStockValue - basePortfolioValue) / basePortfolioValue) * 100
     : 0;
 
-  // All trades since inception
-  const allTrades: { week: string; ticker: string; action: string; shares: number; price: number }[] = [];
+  // All trades since inception (using execution prices from API)
+  const execDates = ['2026-01-05', '2026-01-12', '2026-01-20'];
+  const allTrades: { week: string; ticker: string; action: string; shares: number; price: number | null }[] = [];
 
   // Week 1: initial buys from positions
   const week1 = data.weeks[0];
   if (week1?.positions) {
     week1.positions.forEach((pos: any) => {
-      allTrades.push({ week: 'W1', ticker: pos.ticker, action: 'BUY', shares: pos.shares, price: pos.execPrice });
+      const apiPrice = execPrices?.[execDates[0]]?.[pos.ticker];
+      allTrades.push({ week: 'W1', ticker: pos.ticker, action: 'BUY', shares: pos.shares, price: apiPrice ?? null });
     });
   }
 
   // Week 2: explicit trades
   if (latestWeek.trades) {
     latestWeek.trades.forEach((t: any) => {
-      allTrades.push({ week: 'W2', ticker: t.ticker, action: t.action, shares: t.shares, price: t.price });
+      const apiPrice = execPrices?.[execDates[1]]?.[t.ticker];
+      allTrades.push({ week: 'W2', ticker: t.ticker, action: t.action, shares: t.shares, price: apiPrice ?? null });
     });
   }
 
   // Week 3: trades (executed Jan 20)
   if (activeWeek?.plannedTrades) {
     activeWeek.plannedTrades.forEach((t: any) => {
-      allTrades.push({ week: 'W3', ticker: t.ticker, action: t.action, shares: t.shares, price: t.estimatedPrice });
+      const apiPrice = execPrices?.[execDates[2]]?.[t.ticker];
+      allTrades.push({ week: 'W3', ticker: t.ticker, action: t.action, shares: t.shares, price: apiPrice ?? null });
     });
   }
 
@@ -441,7 +462,7 @@ export default function Dashboard() {
                     </td>
                     <td className="py-2 px-1 text-white text-sm font-medium">{trade.ticker}</td>
                     <td className="py-2 px-1 text-right text-gray-300 text-sm font-mono">
-                      {trade.shares} <span className="text-gray-500">(${trade.price.toFixed(2)})</span>
+                      {trade.shares} <span className="text-gray-500">({trade.price !== null ? `$${trade.price.toFixed(2)}` : '-'})</span>
                     </td>
                   </tr>
                 ))}
