@@ -24,73 +24,60 @@ export default function HomePage() {
       </p>
 
       {/* Navigation Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl w-full">
-        <Link href="/dashboard" className="group">
-          <div className="card hover:shadow-lg transition-shadow border-2 border-transparent hover:border-amber-700 h-full">
-            <div className="text-center">
-              <div className="text-4xl mb-4">📊</div>
-              <h2 className="text-xl font-bold text-gray-900 mb-2 group-hover:text-amber-800">
-                Dashboard
-              </h2>
-              <p className="text-sm text-gray-600">
-                View portfolio performance, allocations, and weekly metrics
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl w-full">
+        <Link href="/dogs-of-the-dow" className="group">
+          <div className="relative h-64 rounded-lg overflow-hidden shadow-md hover:shadow-xl transition-shadow border-2 border-transparent hover:border-amber-700">
+            <Image
+              src="/dogs_of_the_dow.jpg"
+              alt="Dogs of the Dow"
+              fill
+              className="object-cover group-hover:scale-105 transition-transform duration-300"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+            <div className="absolute bottom-0 left-0 right-0 p-4 text-white">
+              <h2 className="text-xl font-bold mb-1">Dogs of the Dow</h2>
+              <p className="text-sm text-gray-200">
+                Tangency portfolio on high-yield Dow stocks
               </p>
             </div>
           </div>
         </Link>
 
-        <Link href="/calculator" className="group">
-          <div className="card hover:shadow-lg transition-shadow border-2 border-transparent hover:border-amber-700 h-full">
-            <div className="text-center">
-              <div className="text-4xl mb-4">🧮</div>
-              <h2 className="text-xl font-bold text-gray-900 mb-2 group-hover:text-amber-800">
-                Calculator
-              </h2>
-              <p className="text-sm text-gray-600">
-                Calculate exact trades for your capital using tangency weights
+        <Link href="/contrarian-plays" className="group">
+          <div className="relative h-64 rounded-lg overflow-hidden shadow-md hover:shadow-xl transition-shadow border-2 border-transparent hover:border-amber-700">
+            <Image
+              src="/contrarian_plays.jpg"
+              alt="Contrarian Plays"
+              fill
+              className="object-cover group-hover:scale-105 transition-transform duration-300"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+            <div className="absolute bottom-0 left-0 right-0 p-4 text-white">
+              <h2 className="text-xl font-bold mb-1">Contrarian Plays</h2>
+              <p className="text-sm text-gray-200">
+                Opportunities against market sentiment
               </p>
             </div>
           </div>
         </Link>
 
-        <Link href="/backtest" className="group">
-          <div className="card hover:shadow-lg transition-shadow border-2 border-transparent hover:border-amber-700 h-full">
-            <div className="text-center">
-              <div className="text-4xl mb-4">📈</div>
-              <h2 className="text-xl font-bold text-gray-900 mb-2 group-hover:text-amber-800">
-                Backtest
-              </h2>
-              <p className="text-sm text-gray-600">
-                Configure parameters and analyze historical performance
+        <Link href="/genesis" className="group">
+          <div className="relative h-64 rounded-lg overflow-hidden shadow-md hover:shadow-xl transition-shadow border-2 border-transparent hover:border-amber-700">
+            <Image
+              src="/genesis.jpg"
+              alt="Genesis"
+              fill
+              className="object-cover group-hover:scale-105 transition-transform duration-300"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+            <div className="absolute bottom-0 left-0 right-0 p-4 text-white">
+              <h2 className="text-xl font-bold mb-1">Genesis</h2>
+              <p className="text-sm text-gray-200">
+                Early-stage opportunities and emerging trends
               </p>
             </div>
           </div>
         </Link>
-      </div>
-
-      {/* Strategy Summary */}
-      <div className="mt-12 max-w-2xl text-center">
-        <h3 className="text-lg font-semibold text-gray-800 mb-4">
-          Dogs of the Dow - Tangency Portfolio Strategy
-        </h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <div className="bg-amber-50 rounded-lg p-3">
-            <div className="font-bold text-amber-900">Weekly</div>
-            <div className="text-gray-600">Rebalancing</div>
-          </div>
-          <div className="bg-amber-50 rounded-lg p-3">
-            <div className="font-bold text-amber-900">Sharpe</div>
-            <div className="text-gray-600">Optimized</div>
-          </div>
-          <div className="bg-amber-50 rounded-lg p-3">
-            <div className="font-bold text-amber-900">10 Stocks</div>
-            <div className="text-gray-600">Universe</div>
-          </div>
-          <div className="bg-amber-50 rounded-lg p-3">
-            <div className="font-bold text-amber-900">156 Week</div>
-            <div className="text-gray-600">Lookback</div>
-          </div>
-        </div>
       </div>
     </div>
   );

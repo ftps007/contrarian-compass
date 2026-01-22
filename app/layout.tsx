@@ -4,8 +4,8 @@ import Image from 'next/image'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'The Contrarian Compass - Dogs of the Dow Tangency Portfolio',
-  description: 'Navigate the markets with data-driven contrarian strategies using Modern Portfolio Theory',
+  title: 'The Contrarian Compass',
+  description: 'Navigate the markets with data-driven contrarian strategies',
 }
 
 export default function RootLayout({
@@ -34,14 +34,14 @@ export default function RootLayout({
                 </Link>
               </div>
               <div className="flex items-center space-x-1">
-                <Link href="/dashboard" className="text-stone-600 hover:text-amber-800 hover:bg-stone-200 px-3 py-2 rounded-md transition-colors">
-                  Dashboard
+                <Link href="/dogs-of-the-dow" className="text-stone-600 hover:text-amber-800 hover:bg-stone-200 px-3 py-2 rounded-md transition-colors">
+                  Dogs of the Dow
                 </Link>
-                <Link href="/calculator" className="text-stone-600 hover:text-amber-800 hover:bg-stone-200 px-3 py-2 rounded-md transition-colors">
-                  Calculator
+                <Link href="/contrarian-plays" className="text-stone-600 hover:text-amber-800 hover:bg-stone-200 px-3 py-2 rounded-md transition-colors">
+                  Contrarian Plays
                 </Link>
-                <Link href="/backtest" className="text-stone-600 hover:text-amber-800 hover:bg-stone-200 px-3 py-2 rounded-md transition-colors">
-                  Backtest
+                <Link href="/genesis" className="text-stone-600 hover:text-amber-800 hover:bg-stone-200 px-3 py-2 rounded-md transition-colors">
+                  Genesis
                 </Link>
               </div>
             </div>
@@ -53,7 +53,7 @@ export default function RootLayout({
         <footer className="bg-stone-100 border-t border-stone-200 mt-auto">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
             <p className="text-center text-sm text-stone-500">
-              The Contrarian Compass - Dogs of the Dow Tangency Portfolio Strategy
+              The Contrarian Compass
             </p>
           </div>
         </footer>
