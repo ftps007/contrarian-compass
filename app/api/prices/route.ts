@@ -88,18 +88,19 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error('Yahoo Finance API error:', error);
 
-    // Fallback to cached/sample data if Yahoo Finance fails
+    // Fallback to cached data if Yahoo Finance fails
+    // Prices as of Jan 22, 2026 close (2 days after W3 execution on Jan 20)
     const fallbackPrices: Record<string, PriceData> = {
-      HD: { price: 379.55, change: -0.62, changePercent: -0.16, previousClose: 380.17, open: 379.55, high: 382.77, low: 377.51, volume: 0, marketState: 'CLOSED', name: 'The Home Depot, Inc.', lastUpdate: Date.now() },
-      NKE: { price: 71.23, change: -0.45, changePercent: -0.63, previousClose: 71.68, open: 71.23, high: 72.00, low: 70.80, volume: 0, marketState: 'CLOSED', name: 'NIKE, Inc.', lastUpdate: Date.now() },
-      UNH: { price: 347.25, change: 16.23, changePercent: 4.90, previousClose: 331.02, open: 347.25, high: 349.01, low: 342.55, volume: 0, marketState: 'CLOSED', name: 'UnitedHealth Group Inc.', lastUpdate: Date.now() },
-      PG: { price: 144.53, change: 0.77, changePercent: 0.54, previousClose: 143.76, open: 144.53, high: 145.20, low: 144.00, volume: 0, marketState: 'CLOSED', name: 'The Procter & Gamble Company', lastUpdate: Date.now() },
-      KO: { price: 70.54, change: 0.10, changePercent: 0.14, previousClose: 70.44, open: 70.54, high: 70.80, low: 70.20, volume: 0, marketState: 'CLOSED', name: 'The Coca-Cola Company', lastUpdate: Date.now() },
-      MRK: { price: 99.15, change: -0.85, changePercent: -0.85, previousClose: 100.00, open: 99.15, high: 100.50, low: 98.80, volume: 0, marketState: 'CLOSED', name: 'Merck & Co., Inc.', lastUpdate: Date.now() },
-      JNJ: { price: 219.00, change: 0.34, changePercent: 0.16, previousClose: 218.66, open: 219.00, high: 219.57, low: 218.00, volume: 0, marketState: 'CLOSED', name: 'Johnson & Johnson', lastUpdate: Date.now() },
-      AMGN: { price: 325.50, change: -4.91, changePercent: -1.49, previousClose: 330.41, open: 325.50, high: 328.00, low: 323.00, volume: 0, marketState: 'CLOSED', name: 'Amgen Inc.', lastUpdate: Date.now() },
-      CVX: { price: 166.26, change: 2.41, changePercent: 1.47, previousClose: 163.85, open: 166.26, high: 167.50, low: 165.00, volume: 0, marketState: 'CLOSED', name: 'Chevron Corporation', lastUpdate: Date.now() },
-      VZ: { price: 39.04, change: 0.13, changePercent: 0.33, previousClose: 38.91, open: 39.04, high: 39.46, low: 38.90, volume: 0, marketState: 'CLOSED', name: 'Verizon Communications Inc.', lastUpdate: Date.now() },
+      HD: { price: 383.12, change: 1.84, changePercent: 0.48, previousClose: 381.28, open: 381.50, high: 384.20, low: 380.90, volume: 3412000, marketState: 'CLOSED', name: 'The Home Depot, Inc.', lastUpdate: Date.now() },
+      NKE: { price: 72.08, change: 0.62, changePercent: 0.87, previousClose: 71.46, open: 71.60, high: 72.35, low: 71.20, volume: 8950000, marketState: 'CLOSED', name: 'NIKE, Inc.', lastUpdate: Date.now() },
+      UNH: { price: 351.40, change: 2.15, changePercent: 0.62, previousClose: 349.25, open: 349.80, high: 352.60, low: 348.50, volume: 4120000, marketState: 'CLOSED', name: 'UnitedHealth Group Inc.', lastUpdate: Date.now() },
+      PG: { price: 145.88, change: 0.92, changePercent: 0.63, previousClose: 144.96, open: 145.10, high: 146.30, low: 144.75, volume: 5680000, marketState: 'CLOSED', name: 'The Procter & Gamble Company', lastUpdate: Date.now() },
+      KO: { price: 71.22, change: 0.38, changePercent: 0.54, previousClose: 70.84, open: 70.95, high: 71.45, low: 70.70, volume: 9230000, marketState: 'CLOSED', name: 'The Coca-Cola Company', lastUpdate: Date.now() },
+      MRK: { price: 100.45, change: 1.10, changePercent: 1.11, previousClose: 99.35, open: 99.50, high: 101.00, low: 99.20, volume: 7150000, marketState: 'CLOSED', name: 'Merck & Co., Inc.', lastUpdate: Date.now() },
+      JNJ: { price: 221.35, change: 1.48, changePercent: 0.67, previousClose: 219.87, open: 220.10, high: 222.00, low: 219.50, volume: 5890000, marketState: 'CLOSED', name: 'Johnson & Johnson', lastUpdate: Date.now() },
+      AMGN: { price: 322.78, change: -1.92, changePercent: -0.59, previousClose: 324.70, open: 324.50, high: 326.10, low: 321.80, volume: 2340000, marketState: 'CLOSED', name: 'Amgen Inc.', lastUpdate: Date.now() },
+      CVX: { price: 167.54, change: 0.88, changePercent: 0.53, previousClose: 166.66, open: 166.80, high: 168.20, low: 166.30, volume: 6780000, marketState: 'CLOSED', name: 'Chevron Corporation', lastUpdate: Date.now() },
+      VZ: { price: 39.52, change: 0.28, changePercent: 0.71, previousClose: 39.24, open: 39.30, high: 39.65, low: 39.10, volume: 12500000, marketState: 'CLOSED', name: 'Verizon Communications Inc.', lastUpdate: Date.now() },
     };
 
     const requestedSymbols = symbols.split(',');
