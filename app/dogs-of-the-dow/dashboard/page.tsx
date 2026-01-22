@@ -140,8 +140,30 @@ export default function Dashboard() {
     ? ((liveStockValue - basePortfolioValue) / basePortfolioValue) * 100
     : 0;
 
-  // Recent trades (from active week)
-  const recentTrades = activeWeek?.plannedTrades || latestWeek.trades || [];
+  // All trades since inception
+  const allTrades: { week: string; ticker: string; action: string; shares: number; price: number; estimated?: boolean }[] = [];
+
+  // Week 1: initial buys from positions
+  const week1 = data.weeks[0];
+  if (week1?.positions) {
+    week1.positions.forEach((pos: any) => {
+      allTrades.push({ week: 'W1', ticker: pos.ticker, action: 'BUY', shares: pos.shares, price: pos.execPrice });
+    });
+  }
+
+  // Week 2: explicit trades
+  if (latestWeek.trades) {
+    latestWeek.trades.forEach((t: any) => {
+      allTrades.push({ week: 'W2', ticker: t.ticker, action: t.action, shares: t.shares, price: t.price });
+    });
+  }
+
+  // Week 3: planned trades
+  if (activeWeek?.plannedTrades) {
+    activeWeek.plannedTrades.forEach((t: any) => {
+      allTrades.push({ week: 'W3', ticker: t.ticker, action: t.action, shares: t.shares, price: t.estimatedPrice, estimated: true });
+    });
+  }
 
   return (
     <div className="space-y-0 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-4 bg-[#0d0d0d] min-h-screen">
@@ -349,29 +371,47 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Trades */}
+        {/* All Trades */}
         <div className="px-6 py-4 border-b border-[#252525]">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-gray-400 text-xs uppercase tracking-wider">Trades (W{currentWeekNumber})</span>
-            {activeWeek?.status === 'active' && (
-              <span className="px-2 py-0.5 bg-[#FFB800]/15 text-[#FFB800] text-xs rounded-full">Pending</span>
-            )}
+            <span className="text-gray-400 text-xs uppercase tracking-wider">All Trades</span>
+            <span className="text-gray-500 text-xs">{allTrades.length} trades since inception</span>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-            {recentTrades.map((trade: any, i: number) => (
-              <div key={i} className="flex items-center gap-2 bg-[#252525]/50 rounded-lg px-3 py-2">
-                <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
-                  trade.action === 'BUY'
-                    ? 'bg-[#00D4AA]/15 text-[#00D4AA]'
-                    : 'bg-[#FF6B6B]/15 text-[#FF6B6B]'
-                }`}>
-                  {trade.action}
-                </span>
-                <span className="text-white text-sm font-medium">{trade.ticker}</span>
-                <span className="text-gray-400 text-xs font-mono ml-auto">{trade.shares}</span>
-              </div>
-            ))}
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-[#333]">
+                  <th className="text-left text-gray-500 text-xs uppercase tracking-wider py-1.5 px-1">Week</th>
+                  <th className="text-left text-gray-500 text-xs uppercase tracking-wider py-1.5 px-1">Action</th>
+                  <th className="text-left text-gray-500 text-xs uppercase tracking-wider py-1.5 px-1">Ticker</th>
+                  <th className="text-right text-gray-500 text-xs uppercase tracking-wider py-1.5 px-1">Shares (Price)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allTrades.map((trade, i) => (
+                  <tr key={i} className="border-b border-[#252525]/40">
+                    <td className="py-1.5 px-1 text-gray-500 text-xs font-mono">{trade.week}</td>
+                    <td className="py-1.5 px-1">
+                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                        trade.action === 'BUY'
+                          ? 'bg-[#00D4AA]/15 text-[#00D4AA]'
+                          : 'bg-[#FF6B6B]/15 text-[#FF6B6B]'
+                      }`}>
+                        {trade.action}
+                      </span>
+                    </td>
+                    <td className="py-1.5 px-1 text-white text-sm font-medium">{trade.ticker}</td>
+                    <td className="py-1.5 px-1 text-right text-gray-300 text-sm font-mono">
+                      {trade.shares} <span className="text-gray-500">(${trade.price.toFixed(2)}{trade.estimated ? '*' : ''})</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
+          {activeWeek?.status === 'active' && (
+            <div className="text-gray-600 text-xs mt-2">* estimated price</div>
+          )}
         </div>
 
         {/* Metrics: Sharpe, Beta, CAPM Expected, Actual */}
