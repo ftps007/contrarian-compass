@@ -189,51 +189,54 @@ export default function Dashboard() {
   return (
     <div className="space-y-0 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-4 bg-[#0d0d0d] min-h-screen">
 
-      {/* === SINGLE UNIFIED DASHBOARD === */}
-      <div className="bg-[#1a1a1a] rounded-2xl border border-[#252525] overflow-hidden">
-
-        {/* Header: Title + Controls */}
-        <div className="flex items-center justify-between px-6 pt-5 pb-4">
-          <div>
-            <h1 className="text-xl font-bold text-white">Contrarian Compass</h1>
-            <p className="text-gray-500 text-xs">Dogs of the Dow &middot; Tangency Portfolio</p>
-          </div>
-          <div className="flex items-center gap-3">
-            {livePrices?.isMarketOpen && (
-              <span className="flex items-center gap-1.5 px-2 py-1 bg-[#00D4AA]/10 border border-[#00D4AA]/30 rounded-full">
-                <span className="w-2 h-2 rounded-full bg-[#00D4AA] animate-pulse" />
-                <span className="text-[#00D4AA] text-xs font-medium">LIVE</span>
-              </span>
-            )}
-            <button
-              onClick={fetchLivePrices}
-              disabled={isLoading}
-              className="px-3 py-1.5 bg-[#252525] hover:bg-[#333] text-gray-300 text-xs rounded-lg transition-colors disabled:opacity-50"
+      {/* === PAGE HEADER === */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-xl font-bold text-white">Contrarian Compass</h1>
+          <p className="text-gray-500 text-xs">Dogs of the Dow &middot; Tangency Portfolio</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {livePrices?.isMarketOpen && (
+            <span className="flex items-center gap-1.5 px-2 py-1 bg-[#00D4AA]/10 border border-[#00D4AA]/30 rounded-full">
+              <span className="w-2 h-2 rounded-full bg-[#00D4AA] animate-pulse" />
+              <span className="text-[#00D4AA] text-xs font-medium">LIVE</span>
+            </span>
+          )}
+          <button
+            onClick={fetchLivePrices}
+            disabled={isLoading}
+            className="px-3 py-1.5 bg-[#252525] hover:bg-[#333] text-gray-300 text-xs rounded-lg transition-colors disabled:opacity-50"
+          >
+            {isLoading ? 'Updating...' : 'Refresh'}
+          </button>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1 text-xs text-gray-500">
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+                className="w-3 h-3 accent-[#00D4AA]"
+              />
+              Auto
+            </label>
+            <select
+              value={refreshInterval}
+              onChange={(e) => setRefreshInterval(Number(e.target.value))}
+              disabled={!autoRefresh}
+              className="bg-[#252525] text-gray-300 text-xs rounded px-2 py-1 border border-[#333] disabled:opacity-50"
             >
-              {isLoading ? 'Updating...' : 'Refresh'}
-            </button>
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1 text-xs text-gray-500">
-                <input
-                  type="checkbox"
-                  checked={autoRefresh}
-                  onChange={(e) => setAutoRefresh(e.target.checked)}
-                  className="w-3 h-3 accent-[#00D4AA]"
-                />
-                Auto
-              </label>
-              <select
-                value={refreshInterval}
-                onChange={(e) => setRefreshInterval(Number(e.target.value))}
-                disabled={!autoRefresh}
-                className="bg-[#252525] text-gray-300 text-xs rounded px-2 py-1 border border-[#333] disabled:opacity-50"
-              >
-                <option value={900}>15m</option>
-                <option value={1800}>30m</option>
-                <option value={3600}>1h</option>
-              </select>
-            </div>
+              <option value={900}>15m</option>
+              <option value={1800}>30m</option>
+              <option value={3600}>1h</option>
+            </select>
           </div>
+        </div>
+      </div>
+
+      {/* === SUBSEKTION: DASHBOARD === */}
+      <div className="bg-[#1a1a1a] rounded-2xl border border-[#252525] overflow-hidden mt-4">
+        <div className="px-6 pt-5 pb-3">
+          <h2 className="text-white font-semibold">Dashboard</h2>
         </div>
 
         {/* Year | Week + Total Return */}
@@ -430,7 +433,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* === TRADES === */}
+      {/* === SUBSEKTION: TRADES === */}
       <div className="bg-[#1a1a1a] rounded-2xl border border-[#252525] mt-4 overflow-hidden">
         <div className="flex items-center justify-between px-6 pt-5 pb-3">
           <h2 className="text-white font-semibold">Trades</h2>
