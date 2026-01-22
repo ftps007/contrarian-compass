@@ -52,7 +52,7 @@ export default function Dashboard() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [portfolioHistory, setPortfolioHistory] = useState<PortfolioHistoryEntry[]>([]);
-  const [refreshInterval, setRefreshInterval] = useState(30);
+  const [refreshInterval, setRefreshInterval] = useState(900); // 15 min
 
   const data = samplePortfolioData;
   const latestWeek = data.weeks[1]!;
@@ -185,10 +185,9 @@ export default function Dashboard() {
                 disabled={!autoRefresh}
                 className="bg-[#252525] text-gray-300 text-xs rounded px-2 py-1 border border-[#333] disabled:opacity-50"
               >
-                <option value={10}>10s</option>
-                <option value={30}>30s</option>
-                <option value={60}>1m</option>
-                <option value={300}>5m</option>
+                <option value={900}>15m</option>
+                <option value={1800}>30m</option>
+                <option value={3600}>1h</option>
               </select>
             </div>
           </div>
