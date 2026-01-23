@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import {
-  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine, LabelList
+  ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList
 } from 'recharts';
 import { samplePortfolioData } from '@/lib/sampleData';
 
@@ -371,17 +371,8 @@ export default function Dashboard() {
             {/* Weekly Performance Chart */}
             <div className="px-6 py-5 border-b border-[#252525]">
               <div className="flex items-center justify-between mb-4">
-                <span className="text-white text-sm font-medium">Weekly Returns vs. CAPM</span>
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-full bg-[#00D4AA]" />
-                    <span className="text-gray-400 text-xs">Actual</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-4 h-0 border-t-2 border-dashed border-[#FFB800]" />
-                    <span className="text-gray-400 text-xs">CAPM</span>
-                  </div>
-                </div>
+                <span className="text-white text-sm font-medium">Weekly Returns</span>
+                <span className="text-gray-500 text-xs">Hover for CAPM comparison</span>
               </div>
               <ResponsiveContainer width="100%" height={200}>
                 <ComposedChart data={weeklyChartData} barCategoryGap="30%">
@@ -457,14 +448,6 @@ export default function Dashboard() {
                       }
                       return null;
                     }}
-                  />
-                  {/* CAPM reference line */}
-                  <ReferenceLine
-                    y={capmWeeklyPct}
-                    stroke="#FFB800"
-                    strokeDasharray="6 3"
-                    strokeWidth={2}
-                    label={{ value: `CAPM ${capmWeeklyPct.toFixed(2)}%`, position: 'right', fill: '#FFB800', fontSize: 10 }}
                   />
                   {/* Actual return bars */}
                   <Bar dataKey="actual" radius={[6, 6, 0, 0]} maxBarSize={50}>
