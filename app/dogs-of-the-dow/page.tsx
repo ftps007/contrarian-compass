@@ -29,6 +29,19 @@ interface LivePriceResponse {
   note?: string;
 }
 
+const TICKER_SECTORS: Record<string, string> = {
+  HD: 'Consumer Disc.',
+  NKE: 'Consumer Disc.',
+  UNH: 'Healthcare',
+  PG: 'Consumer Staples',
+  KO: 'Consumer Staples',
+  MRK: 'Healthcare',
+  JNJ: 'Healthcare',
+  AMGN: 'Healthcare',
+  CVX: 'Energy',
+  VZ: 'Communication',
+};
+
 function formatCurrency(value: number): string {
   return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -298,7 +311,7 @@ export default function Dashboard() {
                   <thead>
                     <tr className="border-b border-[#333]">
                       <th className="text-left text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Ticker</th>
-                      <th className="text-left text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Name</th>
+                      <th className="text-left text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Sector</th>
                       <th className="text-right text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Shares</th>
                       <th className="text-right text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Live Price</th>
                       <th className="text-right text-gray-500 text-xs uppercase tracking-wider py-2 px-1">Change</th>
@@ -324,8 +337,8 @@ export default function Dashboard() {
                               {pos.ticker}
                             </a>
                           </td>
-                          <td className="py-2 px-1 text-gray-400 text-xs truncate max-w-[120px]">
-                            {priceData?.name || '-'}
+                          <td className="py-2 px-1 text-gray-400 text-xs">
+                            {TICKER_SECTORS[pos.ticker] || '-'}
                           </td>
                           <td className="py-2 px-1 text-right text-gray-300 font-mono text-sm">{pos.shares}</td>
                           <td className="py-2 px-1 text-right text-white font-mono text-sm">

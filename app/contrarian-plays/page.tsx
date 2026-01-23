@@ -38,7 +38,7 @@ export default function ContrarianPlaysPage() {
     return positions.sort((a, b) => {
       switch (sortKey) {
         case 'ticker': return dir * a.ticker.localeCompare(b.ticker);
-        case 'name': return dir * a.name.localeCompare(b.name);
+        case 'sector': return dir * a.sector.localeCompare(b.sector);
         case 'date': return dir * a.recDate.localeCompare(b.recDate);
         case 'entry': return dir * (a.entryPrice - b.entryPrice);
         case 'current': return dir * (a.currentPrice - b.currentPrice);
@@ -310,7 +310,7 @@ export default function ContrarianPlaysPage() {
                   <tr className="border-b border-[#333]">
                     {[
                       { key: 'ticker', label: 'Ticker', align: 'left' },
-                      { key: 'name', label: 'Name', align: 'left' },
+                      { key: 'sector', label: 'Sector', align: 'left' },
                       { key: 'date', label: 'Entry Date', align: 'left' },
                       { key: 'entry', label: 'Entry', align: 'right' },
                       { key: 'current', label: 'Current', align: 'right' },
@@ -341,7 +341,7 @@ export default function ContrarianPlaysPage() {
                       <td className="py-2 pr-3">
                         <span className="text-[#00D4AA] font-mono font-medium">{p.ticker}</span>
                       </td>
-                      <td className="py-2 pr-3 text-gray-400 text-xs">{p.name}</td>
+                      <td className="py-2 pr-3 text-gray-400 text-xs">{p.sector}</td>
                       <td className="py-2 pr-3 text-gray-400 text-xs font-mono">{formatDate(p.recDate)}</td>
                       <td className="py-2 pr-3 text-right text-gray-400 font-mono">${p.entryPrice.toFixed(2)}</td>
                       <td className="py-2 pr-3 text-right text-white font-mono">${p.currentPrice.toFixed(2)}</td>
@@ -461,7 +461,7 @@ export default function ContrarianPlaysPage() {
                 <thead>
                   <tr className="border-b border-[#333]">
                     <th className="text-left text-gray-400 text-xs uppercase tracking-wider py-3 pr-3">Ticker</th>
-                    <th className="text-left text-gray-400 text-xs uppercase tracking-wider py-3 pr-3">Name</th>
+                    <th className="text-left text-gray-400 text-xs uppercase tracking-wider py-3 pr-3">Sector</th>
                     <th className="text-left text-gray-400 text-xs uppercase tracking-wider py-3 pr-3">Entry</th>
                     <th className="text-left text-gray-400 text-xs uppercase tracking-wider py-3 pr-3">Exit</th>
                     <th className="text-right text-gray-400 text-xs uppercase tracking-wider py-3 pr-3">Buy</th>
@@ -479,7 +479,7 @@ export default function ContrarianPlaysPage() {
                       <td className="py-2 pr-3">
                         <span className="text-gray-300 font-mono font-medium">{p.ticker}</span>
                       </td>
-                      <td className="py-2 pr-3 text-gray-400 text-xs">{p.name}</td>
+                      <td className="py-2 pr-3 text-gray-400 text-xs">{p.sector}</td>
                       <td className="py-2 pr-3 text-gray-400 text-xs font-mono">{formatDate(p.recDate)}</td>
                       <td className="py-2 pr-3 text-gray-400 text-xs font-mono">{formatDate(p.exitDate)}</td>
                       <td className="py-2 pr-3 text-right text-gray-400 font-mono">${p.entryPrice.toFixed(2)}</td>
