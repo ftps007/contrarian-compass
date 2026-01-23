@@ -30,9 +30,43 @@ const SECTOR_COLORS: Record<string, string> = {
 
 export default function GenesisPage() {
   const [activeTab, setActiveTab] = useState<'overview' | 'holdings' | 'performance' | 'risk'>('overview');
+  const [sortKey, setSortKey] = useState<string>('ticker');
+  const [sortCycle, setSortCycle] = useState<number>(0); // 0=asc, 1=desc, 2=alpha
 
   const metrics = useMemo(() => calculatePortfolioMetrics(genesisHoldings), []);
   const sectorAllocation = useMemo(() => calculateSectorAllocation(genesisHoldings), []);
+
+  const handleSort = (key: string) => {
+    if (key === sortKey) {
+      setSortCycle((sortCycle + 1) % 3);
+    } else {
+      setSortKey(key);
+      setSortCycle(0);
+    }
+  };
+
+  const sortedHoldings = useMemo(() => {
+    const holdings = [...genesisHoldings];
+    if (sortCycle === 2) {
+      return holdings.sort((a, b) => a.ticker.localeCompare(b.ticker));
+    }
+    const dir = sortCycle === 0 ? 1 : -1;
+    return holdings.sort((a, b) => {
+      let va: number | string = 0, vb: number | string = 0;
+      switch (sortKey) {
+        case 'ticker': va = a.ticker; vb = b.ticker; return dir * (va as string).localeCompare(vb as string);
+        case 'sector': va = a.sector; vb = b.sector; return dir * (va as string).localeCompare(vb as string);
+        case 'theme': va = a.theme; vb = b.theme; return dir * (va as string).localeCompare(vb as string);
+        case 'shares': va = a.shares; vb = b.shares; break;
+        case 'entry': va = a.entryPrice; vb = b.entryPrice; break;
+        case 'current': va = a.currentPrice || 0; vb = b.currentPrice || 0; break;
+        case 'cost': va = a.initialInvestment; vb = b.initialInvestment; break;
+        case 'value': va = a.currentInvestment || 0; vb = b.currentInvestment || 0; break;
+        case 'return': va = a.delta || -999; vb = b.delta || -999; break;
+      }
+      return dir * ((va as number) - (vb as number));
+    });
+  }, [sortKey, sortCycle]);
 
   // Current benchmark values (as of Jan 16, 2026)
   const spxReturn = ((benchmarks.spx.current - benchmarks.spx.inception) / benchmarks.spx.inception) * 100;
@@ -269,20 +303,35 @@ export default function GenesisPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[#333]">
-                  <th className="text-left text-gray-400 text-xs uppercase tracking-wider py-3 pr-3">Ticker</th>
-                  <th className="text-left text-gray-400 text-xs uppercase tracking-wider py-3 pr-3">Sector</th>
-                  <th className="text-left text-gray-400 text-xs uppercase tracking-wider py-3 pr-3">Theme</th>
-                  <th className="text-right text-gray-400 text-xs uppercase tracking-wider py-3 pr-3">Shares</th>
-                  <th className="text-right text-gray-400 text-xs uppercase tracking-wider py-3 pr-3">Entry</th>
-                  <th className="text-right text-gray-400 text-xs uppercase tracking-wider py-3 pr-3">Current</th>
-                  <th className="text-right text-gray-400 text-xs uppercase tracking-wider py-3 pr-3">Cost</th>
-                  <th className="text-right text-gray-400 text-xs uppercase tracking-wider py-3 pr-3">Value</th>
-                  <th className="text-right text-gray-400 text-xs uppercase tracking-wider py-3">Return</th>
+                  {[
+                    { key: 'ticker', label: 'Ticker', align: 'left' },
+                    { key: 'sector', label: 'Sector', align: 'left' },
+                    { key: 'theme', label: 'Theme', align: 'left' },
+                    { key: 'shares', label: 'Shares', align: 'right' },
+                    { key: 'entry', label: 'Entry', align: 'right' },
+                    { key: 'current', label: 'Current', align: 'right' },
+                    { key: 'cost', label: 'Cost', align: 'right' },
+                    { key: 'value', label: 'Value', align: 'right' },
+                    { key: 'return', label: 'Return', align: 'right' },
+                  ].map((col) => (
+                    <th
+                      key={col.key}
+                      onClick={() => handleSort(col.key)}
+                      className={`text-${col.align} text-gray-400 text-xs uppercase tracking-wider py-3 pr-3 cursor-pointer hover:text-white transition-colors select-none`}
+                    >
+                      {col.label}
+                      {sortKey === col.key && (
+                        <span className="ml-1 text-[#00D4AA]">
+                          {sortCycle === 0 ? '↑' : sortCycle === 1 ? '↓' : 'A'}
+                        </span>
+                      )}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {genesisHoldings.map((h, idx) => (
-                  <tr key={h.ticker} className={idx !== genesisHoldings.length - 1 ? 'border-b border-[#252525]' : ''}>
+                {sortedHoldings.map((h, idx) => (
+                  <tr key={h.ticker} className={idx !== sortedHoldings.length - 1 ? 'border-b border-[#252525]' : ''}>
                     <td className="py-2 pr-3">
                       <span className="text-[#00D4AA] font-mono font-medium">{h.ticker}</span>
                     </td>
