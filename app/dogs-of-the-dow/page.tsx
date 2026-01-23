@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from 'recharts';
 import { samplePortfolioData } from '@/lib/sampleData';
 
@@ -29,21 +29,8 @@ interface LivePriceResponse {
   note?: string;
 }
 
-interface PortfolioHistoryEntry {
-  time: string;
-  timestamp: number;
-  value: number;
-  change: number;
-  changePercent: number;
-}
-
 function formatCurrency(value: number): string {
   return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function formatCompact(value: number): string {
-  if (value >= 1000) return `$${(value / 1000).toFixed(1)}k`;
-  return `$${value.toFixed(0)}`;
 }
 
 export default function Dashboard() {
@@ -51,7 +38,6 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [portfolioHistory, setPortfolioHistory] = useState<PortfolioHistoryEntry[]>([]);
   const [refreshInterval, setRefreshInterval] = useState(900); // 15 min
   const [execPrices, setExecPrices] = useState<Record<string, Record<string, number>> | null>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'trades'>('dashboard');
@@ -78,13 +64,6 @@ export default function Dashboard() {
   const capmAnnual = (capmExpectedReturn * 52) * 100;
   const actualAnnual = (actualWeeklyReturn * 52) * 100;
 
-  const calculatePortfolioValue = useCallback((prices: Record<string, PriceData>) => {
-    return (activeWeek?.targetPositions || []).reduce((sum: number, p: any) => {
-      const price = prices[p.ticker]?.price || 0;
-      return sum + p.shares * price;
-    }, 0);
-  }, [activeWeek]);
-
   const fetchLivePrices = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -93,29 +72,12 @@ export default function Dashboard() {
       const priceData = await response.json();
       setLivePrices(priceData);
       setLastRefresh(new Date());
-
-      if (priceData.prices && Object.keys(priceData.prices).length > 0) {
-        const currentValue = calculatePortfolioValue(priceData.prices);
-        const change = currentValue - basePortfolioValue;
-        const changePercent = (change / basePortfolioValue) * 100;
-
-        const now = new Date();
-        const newEntry: PortfolioHistoryEntry = {
-          time: now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-          timestamp: now.getTime(),
-          value: currentValue,
-          change,
-          changePercent,
-        };
-
-        setPortfolioHistory(prev => [...prev, newEntry].slice(-100));
-      }
     } catch (error) {
       console.error('Failed to fetch live prices:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [calculatePortfolioValue, basePortfolioValue]);
+  }, []);
 
   useEffect(() => {
     fetchLivePrices();
@@ -172,6 +134,23 @@ export default function Dashboard() {
   const dailyChangePct = dailyChangeAbs !== null && displayPortfolioValue > 0
     ? (dailyChangeAbs / (displayPortfolioValue - dailyChangeAbs)) * 100
     : null;
+
+  // Weekly performance chart data
+  const capmWeeklyPct = capmExpectedReturn * 100;
+  const weeklyChartData = [
+    ...data.weeks.slice(0, -1).map((w: any, i: number) => ({
+      week: `W${i + 1}`,
+      actual: (w.weeklyReturn || 0) * 100,
+      capm: null as number | null,
+      isCurrent: false,
+    })),
+    {
+      week: `W${data.weeks.length}`,
+      actual: weeklyReturn,
+      capm: capmWeeklyPct,
+      isCurrent: true,
+    },
+  ];
 
   // All trades since inception (using execution prices from API)
   const execDates = ['2026-01-02', '2026-01-12', '2026-01-20'];
@@ -278,23 +257,29 @@ export default function Dashboard() {
 
         {activeTab === 'dashboard' ? (
           <>
-            {/* Year | Week + Performance */}
-            <div className="flex items-center justify-between px-6 py-5 border-b border-[#252525]">
-              <div className="flex items-baseline gap-3">
-                <span className="text-4xl font-bold text-white font-mono tracking-tight">2026</span>
-                <span className="text-4xl font-light text-gray-600">|</span>
-                <span className="text-4xl font-bold text-[#00D4AA] font-mono">W{currentWeekNumber}</span>
+            {/* Year | Week + Portfolio Value + Performance */}
+            <div className="px-6 py-5 border-b border-[#252525]">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-baseline gap-3">
+                  <span className="text-4xl font-bold text-white font-mono tracking-tight">2026</span>
+                  <span className="text-4xl font-light text-gray-600">|</span>
+                  <span className="text-4xl font-bold text-[#00D4AA] font-mono">W{currentWeekNumber}</span>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-bold text-white font-mono">{formatCurrency(displayPortfolioValue)}</div>
+                  <div className="text-gray-500 text-xs">Portfolio (inkl. Cash + Div.)</div>
+                </div>
               </div>
-              <div className="text-right space-y-1">
+              <div className="flex items-center justify-between">
                 <div>
-                  <div className={`text-2xl font-bold font-mono ${totalReturn >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
+                  <div className={`text-lg font-bold font-mono ${totalReturn >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
                     {totalReturn >= 0 ? '+' : ''}{totalReturn.toFixed(2)}%
-                    <span className="text-sm ml-2">({totalReturnAbs >= 0 ? '+' : ''}{formatCurrency(totalReturnAbs)})</span>
+                    <span className="text-sm font-normal ml-1.5">({totalReturnAbs >= 0 ? '+' : ''}{formatCurrency(totalReturnAbs)})</span>
                   </div>
                   <div className="text-gray-500 text-xs">seit 2.1.2026</div>
                 </div>
                 {dailyChangePct !== null && (
-                  <div>
+                  <div className="text-right">
                     <div className={`text-sm font-mono ${dailyChangeAbs! >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
                       {dailyChangePct >= 0 ? '+' : ''}{dailyChangePct.toFixed(2)}%
                       <span className="ml-1">({dailyChangeAbs! >= 0 ? '+' : ''}{formatCurrency(dailyChangeAbs!)})</span>
@@ -382,68 +367,107 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Live Intraday Chart */}
+            {/* Weekly Performance Chart */}
             <div className="px-6 py-4 border-b border-[#252525]">
-              {portfolioHistory.length > 1 ? (
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-gray-400 text-xs uppercase tracking-wider">Intraday</span>
-                    <span className="text-gray-500 text-xs">
-                      {lastRefresh?.toLocaleTimeString()} &middot; {portfolioHistory.length} pts
-                    </span>
-                  </div>
-                  <ResponsiveContainer width="100%" height={160}>
-                    <AreaChart data={portfolioHistory}>
-                      <defs>
-                        <linearGradient id="liveGradient" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor={weeklyReturn >= 0 ? '#00D4AA' : '#FF6B6B'} stopOpacity={0.25} />
-                          <stop offset="100%" stopColor={weeklyReturn >= 0 ? '#00D4AA' : '#FF6B6B'} stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#252525" />
-                      <XAxis dataKey="time" stroke="#666" tick={{ fill: '#666', fontSize: 9 }} axisLine={false} tickLine={false} />
-                      <YAxis
-                        domain={['dataMin - 50', 'dataMax + 50']}
-                        tickFormatter={formatCompact}
-                        stroke="#666"
-                        tick={{ fill: '#666', fontSize: 9 }}
-                        axisLine={false}
-                        tickLine={false}
-                        width={50}
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-gray-400 text-xs uppercase tracking-wider">Weekly Performance</span>
+                <span className="text-gray-500 text-xs">CAPM expected shown for current week</span>
+              </div>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={weeklyChartData} barCategoryGap="25%">
+                  <defs>
+                    <linearGradient id="barGreen" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#00D4AA" stopOpacity={0.9} />
+                      <stop offset="100%" stopColor="#00D4AA" stopOpacity={0.4} />
+                    </linearGradient>
+                    <linearGradient id="barRed" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#FF6B6B" stopOpacity={0.9} />
+                      <stop offset="100%" stopColor="#FF6B6B" stopOpacity={0.4} />
+                    </linearGradient>
+                    <linearGradient id="barGold" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#FFB800" stopOpacity={0.6} />
+                      <stop offset="100%" stopColor="#FFB800" stopOpacity={0.2} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#252525" vertical={false} />
+                  <XAxis
+                    dataKey="week"
+                    stroke="#666"
+                    tick={{ fill: '#aaa', fontSize: 12, fontWeight: 500 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tickFormatter={(v: number) => `${v.toFixed(1)}%`}
+                    stroke="#666"
+                    tick={{ fill: '#666', fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={45}
+                  />
+                  <Tooltip
+                    cursor={{ fill: 'rgba(255,255,255,0.03)' }}
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const d = payload[0]?.payload;
+                        return (
+                          <div className="bg-[#1a1a1a] border border-[#333] rounded-lg p-3 shadow-2xl">
+                            <p className="text-white font-bold text-sm mb-1">{d.week} {d.isCurrent ? '(aktuell)' : ''}</p>
+                            <p className={`font-mono text-sm ${d.actual >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
+                              Rendite: {d.actual >= 0 ? '+' : ''}{d.actual.toFixed(2)}%
+                            </p>
+                            {d.capm !== null && (
+                              <p className="font-mono text-sm text-[#FFB800]">
+                                CAPM: +{d.capm.toFixed(2)}%
+                              </p>
+                            )}
+                            {d.isCurrent && d.capm !== null && (
+                              <p className={`font-mono text-xs mt-1 ${d.actual > d.capm ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
+                                Alpha: {d.actual > d.capm ? '+' : ''}{(d.actual - d.capm).toFixed(2)}%
+                              </p>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  {/* CAPM expected bar (wider, behind) - only shows for current week */}
+                  <Bar dataKey="capm" barSize={40} radius={[4, 4, 0, 0]}>
+                    {weeklyChartData.map((entry, i) => (
+                      <Cell
+                        key={`capm-${i}`}
+                        fill="url(#barGold)"
+                        stroke="#FFB800"
+                        strokeWidth={1}
+                        strokeDasharray="4 2"
                       />
-                      <Tooltip
-                        content={({ active, payload }) => {
-                          if (active && payload && payload.length) {
-                            const d = payload[0].payload as PortfolioHistoryEntry;
-                            return (
-                              <div className="bg-[#1e1e1e] border border-[#333] rounded p-2 shadow-xl text-xs">
-                                <p className="text-white font-mono">{formatCurrency(d.value)}</p>
-                                <p className={`font-mono ${d.changePercent >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
-                                  {d.changePercent >= 0 ? '+' : ''}{d.changePercent.toFixed(3)}%
-                                </p>
-                              </div>
-                            );
-                          }
-                          return null;
-                        }}
+                    ))}
+                  </Bar>
+                  {/* Actual performance bar (narrower, in front) */}
+                  <Bar dataKey="actual" barSize={24} radius={[4, 4, 0, 0]}>
+                    {weeklyChartData.map((entry, i) => (
+                      <Cell
+                        key={`actual-${i}`}
+                        fill={entry.actual >= 0 ? 'url(#barGreen)' : 'url(#barRed)'}
+                        stroke={entry.isCurrent ? (entry.actual >= 0 ? '#00D4AA' : '#FF6B6B') : 'transparent'}
+                        strokeWidth={entry.isCurrent ? 2 : 0}
                       />
-                      <ReferenceLine y={basePortfolioValue} stroke="#444" strokeDasharray="4 4" />
-                      <Area
-                        type="monotone"
-                        dataKey="value"
-                        stroke={weeklyReturn >= 0 ? '#00D4AA' : '#FF6B6B'}
-                        strokeWidth={1.5}
-                        fill="url(#liveGradient)"
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+              {/* Legend */}
+              <div className="flex items-center gap-4 mt-2 justify-center">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-3 h-3 rounded-sm bg-gradient-to-b from-[#00D4AA] to-[#00D4AA]/40" />
+                  <span className="text-gray-400 text-xs">Actual</span>
                 </div>
-              ) : (
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-gray-400 text-xs uppercase tracking-wider">Intraday</span>
-                  <span className="text-gray-500 text-xs">Collecting data points...</span>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-3 h-3 rounded-sm border border-dashed border-[#FFB800] bg-[#FFB800]/20" />
+                  <span className="text-gray-400 text-xs">CAPM Expected</span>
                 </div>
-              )}
+              </div>
             </div>
 
             {/* Metrics: Sharpe, Beta, CAPM Expected, Actual */}
