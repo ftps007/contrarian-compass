@@ -224,8 +224,8 @@ export default function GenesisPage() {
 
               <div className="relative pl-10 pb-6">
                 <div className="absolute left-2.5 w-3 h-3 rounded-full bg-[#00D4AA] border-2 border-[#1a1a1a]"></div>
-                <div className="text-white font-medium">8 Weeks Complete</div>
-                <div className="text-gray-500 text-sm">January 16, 2026 - {formatPercent(portfolioSummary.pricedReturn)} return (priced), {formatPercent(portfolioSummary.estimatedTotalReturn)} est. total</div>
+                <div className="text-white font-medium">9 Weeks Complete</div>
+                <div className="text-gray-500 text-sm">January 23, 2026 - {formatPercent(portfolioSummary.pricedReturn)} return (priced), {formatPercent(portfolioSummary.estimatedTotalReturn)} est. total</div>
               </div>
 
               <div className="relative pl-10 pb-6">
@@ -471,7 +471,7 @@ export default function GenesisPage() {
 
             {/* Footer */}
             <div className="flex items-center justify-between px-6 py-3 bg-[#151515] text-xs text-gray-600">
-              <span>Best: +4.7% | Worst: -1.4%</span>
+              <span>Best: +3.4% | Worst: -1.7%</span>
               <span>CAPM Expected: {formatPercent(alphaVsNdx.expectedReturn)}</span>
             </div>
           </div>
