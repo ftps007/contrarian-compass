@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
+  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine, LabelList
 } from 'recharts';
 import { samplePortfolioData } from '@/lib/sampleData';
 
@@ -141,7 +141,7 @@ export default function Dashboard() {
     ...data.weeks.slice(0, -1).map((w: any, i: number) => ({
       week: `W${i + 1}`,
       actual: (w.weeklyReturn || 0) * 100,
-      capm: null as number | null,
+      capm: capmWeeklyPct,
       isCurrent: false,
     })),
     {
@@ -368,106 +368,121 @@ export default function Dashboard() {
             </div>
 
             {/* Weekly Performance Chart */}
-            <div className="px-6 py-4 border-b border-[#252525]">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-gray-400 text-xs uppercase tracking-wider">Weekly Performance</span>
-                <span className="text-gray-500 text-xs">CAPM expected shown for current week</span>
+            <div className="px-6 py-5 border-b border-[#252525]">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-white text-sm font-medium">Weekly Returns vs. CAPM</span>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-2.5 h-2.5 rounded-full bg-[#00D4AA]" />
+                    <span className="text-gray-400 text-xs">Actual</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-4 h-0 border-t-2 border-dashed border-[#FFB800]" />
+                    <span className="text-gray-400 text-xs">CAPM</span>
+                  </div>
+                </div>
               </div>
-              <ResponsiveContainer width="100%" height={180}>
-                <BarChart data={weeklyChartData} barCategoryGap="25%">
+              <ResponsiveContainer width="100%" height={200}>
+                <ComposedChart data={weeklyChartData} barCategoryGap="30%">
                   <defs>
                     <linearGradient id="barGreen" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#00D4AA" stopOpacity={0.9} />
-                      <stop offset="100%" stopColor="#00D4AA" stopOpacity={0.4} />
+                      <stop offset="0%" stopColor="#00D4AA" stopOpacity={1} />
+                      <stop offset="100%" stopColor="#00896e" stopOpacity={0.7} />
                     </linearGradient>
                     <linearGradient id="barRed" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#FF6B6B" stopOpacity={0.9} />
-                      <stop offset="100%" stopColor="#FF6B6B" stopOpacity={0.4} />
+                      <stop offset="0%" stopColor="#FF6B6B" stopOpacity={1} />
+                      <stop offset="100%" stopColor="#cc4444" stopOpacity={0.7} />
                     </linearGradient>
-                    <linearGradient id="barGold" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#FFB800" stopOpacity={0.6} />
-                      <stop offset="100%" stopColor="#FFB800" stopOpacity={0.2} />
-                    </linearGradient>
+                    <filter id="glow">
+                      <feGaussianBlur stdDeviation="3" result="blur" />
+                      <feMerge>
+                        <feMergeNode in="blur" />
+                        <feMergeNode in="SourceGraphic" />
+                      </feMerge>
+                    </filter>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#252525" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1f1f1f" vertical={false} />
                   <XAxis
                     dataKey="week"
-                    stroke="#666"
-                    tick={{ fill: '#aaa', fontSize: 12, fontWeight: 500 }}
-                    axisLine={false}
+                    stroke="transparent"
+                    tick={{ fill: '#ccc', fontSize: 13, fontWeight: 600 }}
                     tickLine={false}
+                    dy={8}
                   />
                   <YAxis
                     tickFormatter={(v: number) => `${v.toFixed(1)}%`}
-                    stroke="#666"
-                    tick={{ fill: '#666', fontSize: 10 }}
-                    axisLine={false}
+                    stroke="transparent"
+                    tick={{ fill: '#555', fontSize: 10 }}
                     tickLine={false}
-                    width={45}
+                    width={42}
+                    domain={[0, 'auto']}
                   />
                   <Tooltip
-                    cursor={{ fill: 'rgba(255,255,255,0.03)' }}
+                    cursor={{ fill: 'rgba(255,255,255,0.02)', radius: 8 }}
                     content={({ active, payload }) => {
                       if (active && payload && payload.length) {
                         const d = payload[0]?.payload;
+                        const alpha = d.actual - d.capm;
                         return (
-                          <div className="bg-[#1a1a1a] border border-[#333] rounded-lg p-3 shadow-2xl">
-                            <p className="text-white font-bold text-sm mb-1">{d.week} {d.isCurrent ? '(aktuell)' : ''}</p>
-                            <p className={`font-mono text-sm ${d.actual >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
-                              Rendite: {d.actual >= 0 ? '+' : ''}{d.actual.toFixed(2)}%
-                            </p>
-                            {d.capm !== null && (
-                              <p className="font-mono text-sm text-[#FFB800]">
-                                CAPM: +{d.capm.toFixed(2)}%
-                              </p>
-                            )}
-                            {d.isCurrent && d.capm !== null && (
-                              <p className={`font-mono text-xs mt-1 ${d.actual > d.capm ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
-                                Alpha: {d.actual > d.capm ? '+' : ''}{(d.actual - d.capm).toFixed(2)}%
-                              </p>
-                            )}
+                          <div className="bg-[#111] border border-[#333] rounded-xl p-3.5 shadow-2xl backdrop-blur-sm">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-white font-bold text-sm">{d.week}</span>
+                              {d.isCurrent && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[#00D4AA]/20 text-[#00D4AA] font-medium">LIVE</span>
+                              )}
+                            </div>
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between gap-4">
+                                <span className="text-gray-400 text-xs">Rendite</span>
+                                <span className={`font-mono text-sm font-bold ${d.actual >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
+                                  {d.actual >= 0 ? '+' : ''}{d.actual.toFixed(3)}%
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between gap-4">
+                                <span className="text-gray-400 text-xs">CAPM</span>
+                                <span className="font-mono text-sm text-[#FFB800]">+{d.capm.toFixed(3)}%</span>
+                              </div>
+                              <div className="border-t border-[#333] pt-1 mt-1">
+                                <div className="flex items-center justify-between gap-4">
+                                  <span className="text-gray-400 text-xs">Alpha</span>
+                                  <span className={`font-mono text-sm font-bold ${alpha >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
+                                    {alpha >= 0 ? '+' : ''}{alpha.toFixed(3)}%
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         );
                       }
                       return null;
                     }}
                   />
-                  {/* CAPM expected bar (wider, behind) - only shows for current week */}
-                  <Bar dataKey="capm" barSize={40} radius={[4, 4, 0, 0]}>
+                  {/* CAPM reference line */}
+                  <ReferenceLine
+                    y={capmWeeklyPct}
+                    stroke="#FFB800"
+                    strokeDasharray="6 3"
+                    strokeWidth={2}
+                    label={{ value: `CAPM ${capmWeeklyPct.toFixed(2)}%`, position: 'right', fill: '#FFB800', fontSize: 10 }}
+                  />
+                  {/* Actual return bars */}
+                  <Bar dataKey="actual" radius={[6, 6, 0, 0]} maxBarSize={50}>
+                    <LabelList
+                      dataKey="actual"
+                      position="top"
+                      formatter={(v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`}
+                      style={{ fill: '#aaa', fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}
+                    />
                     {weeklyChartData.map((entry, i) => (
                       <Cell
-                        key={`capm-${i}`}
-                        fill="url(#barGold)"
-                        stroke="#FFB800"
-                        strokeWidth={1}
-                        strokeDasharray="4 2"
-                      />
-                    ))}
-                  </Bar>
-                  {/* Actual performance bar (narrower, in front) */}
-                  <Bar dataKey="actual" barSize={24} radius={[4, 4, 0, 0]}>
-                    {weeklyChartData.map((entry, i) => (
-                      <Cell
-                        key={`actual-${i}`}
+                        key={`bar-${i}`}
                         fill={entry.actual >= 0 ? 'url(#barGreen)' : 'url(#barRed)'}
-                        stroke={entry.isCurrent ? (entry.actual >= 0 ? '#00D4AA' : '#FF6B6B') : 'transparent'}
-                        strokeWidth={entry.isCurrent ? 2 : 0}
+                        style={entry.isCurrent ? { filter: 'url(#glow)' } : {}}
                       />
                     ))}
                   </Bar>
-                </BarChart>
+                </ComposedChart>
               </ResponsiveContainer>
-              {/* Legend */}
-              <div className="flex items-center gap-4 mt-2 justify-center">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-3 h-3 rounded-sm bg-gradient-to-b from-[#00D4AA] to-[#00D4AA]/40" />
-                  <span className="text-gray-400 text-xs">Actual</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-3 h-3 rounded-sm border border-dashed border-[#FFB800] bg-[#FFB800]/20" />
-                  <span className="text-gray-400 text-xs">CAPM Expected</span>
-                </div>
-              </div>
             </div>
 
             {/* Metrics: Sharpe, Beta, CAPM Expected, Actual */}
