@@ -342,82 +342,20 @@ export default function GenesisPage() {
       {/* Performance Tab */}
       {activeTab === 'performance' && (
         <>
-          {/* Cumulative Performance */}
-          <div className="bg-[#1a1a1a] rounded-2xl p-6 border border-[#252525]">
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-white text-sm font-medium">Cumulative Returns vs Benchmarks</span>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2.5 h-2.5 rounded-full bg-[#00D4AA]" />
-                  <span className="text-gray-400 text-xs">Genesis</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-4 h-0 border-t-2 border-dashed border-[#FFB800]" />
-                  <span className="text-gray-400 text-xs">NDX</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-4 h-0 border-t-2 border-dashed border-[#666]" />
-                  <span className="text-gray-400 text-xs">SPX</span>
-                </div>
-              </div>
-            </div>
-            <ResponsiveContainer width="100%" height={280}>
-              <AreaChart data={weeklyPerformance} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="genesisGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#00D4AA" stopOpacity={0.3} />
-                    <stop offset="100%" stopColor="#00D4AA" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f1f1f" vertical={false} />
-                <XAxis dataKey="week" stroke="transparent" tick={{ fill: '#ccc', fontSize: 11, fontWeight: 500 }} tickLine={false} />
-                <YAxis stroke="transparent" tick={{ fill: '#555', fontSize: 10 }} tickLine={false} tickFormatter={(v) => `${v}%`} width={40} />
-                <Tooltip
-                  content={({ active, payload, label }) => {
-                    if (active && payload && payload.length) {
-                      return (
-                        <div className="bg-[#111] border border-[#333] rounded-2xl p-3.5 shadow-2xl">
-                          <p className="text-white font-bold text-sm mb-2">{label}</p>
-                          <div className="space-y-1">
-                            {payload.map((p: any) => (
-                              <div key={p.name} className="flex items-center justify-between gap-4">
-                                <span className="text-gray-400 text-xs">{p.name === 'genesis' ? 'Genesis' : p.name.toUpperCase()}</span>
-                                <span className="font-mono text-sm" style={{ color: p.color }}>
-                                  {p.value >= 0 ? '+' : ''}{Number(p.value).toFixed(1)}%
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-                <ReferenceLine y={0} stroke="#333" />
-                <Area type="monotone" dataKey="genesis" stroke="#00D4AA" fill="url(#genesisGradient)" strokeWidth={2.5} name="genesis" />
-                <Area type="monotone" dataKey="ndx" stroke="#FFB800" fill="transparent" strokeWidth={1.5} strokeDasharray="5 5" name="ndx" />
-                <Area type="monotone" dataKey="spx" stroke="#666" fill="transparent" strokeWidth={1.5} strokeDasharray="3 3" name="spx" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Weekly Returns + Alpha */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-[#1a1a1a] rounded-2xl border border-[#252525] overflow-hidden">
             {/* Weekly Returns Bar Chart */}
-            <div className="bg-[#1a1a1a] rounded-2xl p-6 border border-[#252525]">
+            <div className="px-6 py-5 border-b border-[#252525]">
               <div className="flex items-center justify-between mb-4">
                 <span className="text-white text-sm font-medium">Weekly Returns</span>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2.5 h-2.5 rounded-full bg-[#00D4AA]" />
-                  <span className="text-gray-400 text-xs">Actual</span>
-                </div>
+                <span className="text-gray-500 text-xs">Hover for benchmark comparison</span>
               </div>
               <ResponsiveContainer width="100%" height={200}>
                 <ComposedChart data={weeklyPerformance.slice(1).map((w, i) => ({
                   week: w.week,
                   ret: i === 0 ? w.genesis : w.genesis - weeklyPerformance[i].genesis,
-                }))} barCategoryGap="20%">
+                  ndx: i === 0 ? w.ndx : w.ndx - weeklyPerformance[i].ndx,
+                  spx: i === 0 ? w.spx : w.spx - weeklyPerformance[i].spx,
+                }))} barCategoryGap="25%">
                   <defs>
                     <linearGradient id="genBarGreen" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#00D4AA" stopOpacity={1} />
@@ -436,7 +374,7 @@ export default function GenesisPage() {
                     </filter>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1f1f1f" vertical={false} />
-                  <XAxis dataKey="week" stroke="transparent" tick={{ fill: '#aaa', fontSize: 10, fontWeight: 500 }} tickLine={false} />
+                  <XAxis dataKey="week" stroke="transparent" tick={{ fill: '#ccc', fontSize: 11, fontWeight: 500 }} tickLine={false} />
                   <YAxis stroke="transparent" tick={{ fill: '#555', fontSize: 10 }} tickLine={false} tickFormatter={(v: number) => `${v.toFixed(0)}%`} width={35} />
                   <Tooltip
                     cursor={{ fill: 'rgba(255,255,255,0.02)' }}
@@ -444,11 +382,36 @@ export default function GenesisPage() {
                       if (active && payload && payload.length) {
                         const d = payload[0]?.payload;
                         return (
-                          <div className="bg-[#111] border border-[#333] rounded-2xl p-3 shadow-2xl">
-                            <p className="text-white font-bold text-sm mb-1">{d.week}</p>
-                            <p className={`font-mono text-sm ${d.ret >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
-                              {d.ret >= 0 ? '+' : ''}{d.ret.toFixed(2)}%
-                            </p>
+                          <div className="bg-[#111] border border-[#333] rounded-xl p-3.5 shadow-2xl">
+                            <p className="text-white font-bold text-sm mb-2">{d.week}</p>
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between gap-4">
+                                <span className="text-gray-400 text-xs">Genesis</span>
+                                <span className={`font-mono text-sm font-bold ${d.ret >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
+                                  {d.ret >= 0 ? '+' : ''}{d.ret.toFixed(2)}%
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between gap-4">
+                                <span className="text-gray-400 text-xs">NDX</span>
+                                <span className="font-mono text-sm text-[#FFB800]">
+                                  {d.ndx >= 0 ? '+' : ''}{d.ndx.toFixed(2)}%
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between gap-4">
+                                <span className="text-gray-400 text-xs">SPX</span>
+                                <span className="font-mono text-sm text-gray-400">
+                                  {d.spx >= 0 ? '+' : ''}{d.spx.toFixed(2)}%
+                                </span>
+                              </div>
+                              <div className="border-t border-[#333] pt-1 mt-1">
+                                <div className="flex items-center justify-between gap-4">
+                                  <span className="text-gray-400 text-xs">vs NDX</span>
+                                  <span className={`font-mono text-sm font-bold ${(d.ret - d.ndx) >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
+                                    {(d.ret - d.ndx) >= 0 ? '+' : ''}{(d.ret - d.ndx).toFixed(2)}%
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         );
                       }
@@ -456,12 +419,12 @@ export default function GenesisPage() {
                     }}
                   />
                   <ReferenceLine y={0} stroke="#333" />
-                  <Bar dataKey="ret" radius={[5, 5, 0, 0]} maxBarSize={36}>
+                  <Bar dataKey="ret" radius={[6, 6, 0, 0]} maxBarSize={50}>
                     <LabelList
                       dataKey="ret"
                       position="top"
                       formatter={(v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`}
-                      style={{ fill: '#888', fontSize: 9, fontFamily: 'monospace' }}
+                      style={{ fill: '#aaa', fontSize: 10, fontWeight: 500, fontFamily: 'monospace' }}
                     />
                     {weeklyPerformance.slice(1).map((_, i) => {
                       const ret = i === 0
@@ -478,62 +441,101 @@ export default function GenesisPage() {
                   </Bar>
                 </ComposedChart>
               </ResponsiveContainer>
-              <div className="mt-3 grid grid-cols-3 gap-2 text-center border-t border-[#252525] pt-3">
-                <div>
-                  <div className="text-gray-500 text-xs">Best Week</div>
-                  <div className="text-[#00D4AA] font-mono text-sm font-bold">+4.7%</div>
+            </div>
+
+            {/* Metrics Grid */}
+            <div className="grid grid-cols-4 gap-0 divide-x divide-[#252525]">
+              <div className="px-6 py-4 text-center">
+                <div className="text-gray-500 text-xs uppercase tracking-wider mb-1">Alpha</div>
+                <div className={`text-xl font-bold font-mono ${alphaVsNdx.alpha >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
+                  {formatPercent(alphaVsNdx.alpha)}
                 </div>
-                <div>
-                  <div className="text-gray-500 text-xs">Worst Week</div>
-                  <div className="text-[#FF6B6B] font-mono text-sm font-bold">-1.4%</div>
-                </div>
-                <div>
-                  <div className="text-gray-500 text-xs">Win Rate</div>
-                  <div className="text-white font-mono text-sm font-bold">7/8</div>
-                </div>
+                <div className="text-gray-600 text-xs">vs NDX (CAPM)</div>
+              </div>
+              <div className="px-6 py-4 text-center">
+                <div className="text-gray-500 text-xs uppercase tracking-wider mb-1">Beta</div>
+                <div className="text-xl font-bold text-white font-mono">{riskMetrics.beta.toFixed(2)}</div>
+                <div className="text-gray-600 text-xs">High risk</div>
+              </div>
+              <div className="px-6 py-4 text-center">
+                <div className="text-gray-500 text-xs uppercase tracking-wider mb-1">Sharpe</div>
+                <div className="text-xl font-bold text-white font-mono">{riskMetrics.sharpeRatio.toFixed(2)}</div>
+                <div className="text-gray-600 text-xs">Risk-adj.</div>
+              </div>
+              <div className="px-6 py-4 text-center">
+                <div className="text-gray-500 text-xs uppercase tracking-wider mb-1">Win Rate</div>
+                <div className="text-xl font-bold text-[#00D4AA] font-mono">7/8</div>
+                <div className="text-gray-600 text-xs">87.5%</div>
               </div>
             </div>
 
-            {/* Alpha Analysis */}
-            <div className="bg-[#1a1a1a] rounded-2xl p-6 border border-[#252525]">
-              <span className="text-white text-sm font-medium">Alpha (CAPM)</span>
-              <div className="mt-4 space-y-4">
-                <div className="bg-[#0d0d0d] rounded-lg p-3">
-                  <div className="text-gray-500 text-xs mb-1">Formula</div>
-                  <div className="text-white font-mono text-xs">
-                    Alpha = R<sub>p</sub> - [R<sub>f</sub> + Beta x (R<sub>m</sub> - R<sub>f</sub>)]
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <div className="text-gray-500 text-xs">Portfolio Return</div>
-                    <div className="text-[#00D4AA] font-mono font-bold">{formatPercent(portfolioSummary.pricedReturn)}</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-500 text-xs">Beta</div>
-                    <div className="text-white font-mono font-bold">{riskMetrics.beta.toFixed(2)}</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-500 text-xs">NDX Return</div>
-                    <div className="text-[#FFB800] font-mono font-bold">{formatPercent(ndxReturn)}</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-500 text-xs">Risk-Free (8wk)</div>
-                    <div className="text-gray-300 font-mono font-bold">+0.65%</div>
-                  </div>
-                </div>
-                <div className="border-t border-[#252525] pt-3 space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-500 text-xs">CAPM Expected</span>
-                    <span className="text-gray-300 font-mono text-sm">{formatPercent(alphaVsNdx.expectedReturn)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-white text-sm font-medium">Alpha</span>
-                    <span className={`font-mono text-xl font-bold ${alphaVsNdx.alpha >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
-                      {formatPercent(alphaVsNdx.alpha)}
-                    </span>
-                  </div>
-                </div>
+            {/* Footer */}
+            <div className="flex items-center justify-between px-6 py-3 bg-[#151515] text-xs text-gray-600">
+              <span>Best: +4.7% | Worst: -1.4%</span>
+              <span>CAPM Expected: {formatPercent(alphaVsNdx.expectedReturn)}</span>
+            </div>
+          </div>
+
+          {/* Cumulative Performance */}
+          <div className="bg-[#1a1a1a] rounded-2xl border border-[#252525] overflow-hidden mt-4">
+            <div className="px-6 py-5">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-white text-sm font-medium">Cumulative Returns</span>
+                <span className="text-gray-500 text-xs">Hover for details</span>
+              </div>
+              <ResponsiveContainer width="100%" height={220}>
+                <AreaChart data={weeklyPerformance} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="genesisGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#00D4AA" stopOpacity={0.3} />
+                      <stop offset="100%" stopColor="#00D4AA" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1f1f1f" vertical={false} />
+                  <XAxis dataKey="week" stroke="transparent" tick={{ fill: '#ccc', fontSize: 11, fontWeight: 500 }} tickLine={false} />
+                  <YAxis stroke="transparent" tick={{ fill: '#555', fontSize: 10 }} tickLine={false} tickFormatter={(v) => `${v}%`} width={40} />
+                  <Tooltip
+                    content={({ active, payload, label }) => {
+                      if (active && payload && payload.length) {
+                        return (
+                          <div className="bg-[#111] border border-[#333] rounded-xl p-3.5 shadow-2xl">
+                            <p className="text-white font-bold text-sm mb-2">{label}</p>
+                            <div className="space-y-1">
+                              {payload.map((p: any) => (
+                                <div key={p.name} className="flex items-center justify-between gap-4">
+                                  <span className="text-gray-400 text-xs">{p.name === 'genesis' ? 'Genesis' : p.name.toUpperCase()}</span>
+                                  <span className="font-mono text-sm" style={{ color: p.color }}>
+                                    {p.value >= 0 ? '+' : ''}{Number(p.value).toFixed(1)}%
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <ReferenceLine y={0} stroke="#333" />
+                  <Area type="monotone" dataKey="genesis" stroke="#00D4AA" fill="url(#genesisGradient)" strokeWidth={2.5} name="genesis" />
+                  <Area type="monotone" dataKey="ndx" stroke="#FFB800" fill="transparent" strokeWidth={1.5} strokeDasharray="5 5" name="ndx" />
+                  <Area type="monotone" dataKey="spx" stroke="#666" fill="transparent" strokeWidth={1.5} strokeDasharray="3 3" name="spx" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+            {/* Legend footer */}
+            <div className="flex items-center justify-center gap-6 px-6 py-3 bg-[#151515] text-xs text-gray-500">
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-[#00D4AA]" />
+                <span>Genesis</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-0 border-t-2 border-dashed border-[#FFB800]" />
+                <span>NDX</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-0 border-t-2 border-dashed border-[#666]" />
+                <span>SPX</span>
               </div>
             </div>
           </div>
