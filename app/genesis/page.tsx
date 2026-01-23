@@ -248,44 +248,59 @@ export default function GenesisPage() {
 
           {/* Milestones */}
           <div className="bg-[#1a1a1a] rounded-2xl p-6 border border-[#252525]">
-            <h3 className="text-white font-semibold mb-4">Investment Milestones</h3>
+            <h3 className="text-white font-semibold mb-4">EO Implementation Timeline</h3>
             <div className="relative">
               <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-[#333]"></div>
 
               <div className="relative pl-10 pb-6">
                 <div className="absolute left-2.5 w-3 h-3 rounded-full bg-[#00D4AA] border-2 border-[#1a1a1a]"></div>
-                <div className="text-white font-medium">Portfolio Inception</div>
+                <div className="text-white font-medium">Portfolio Inception & EO Signed</div>
                 <div className="text-gray-500 text-sm">November 24, 2025 - {formatCurrency(portfolioSummary.totalInitial)} deployed across {portfolioSummary.totalCount} positions</div>
               </div>
 
               <div className="relative pl-10 pb-6">
-                <div className="absolute left-2.5 w-3 h-3 rounded-full bg-[#00D4AA] border-2 border-[#1a1a1a]"></div>
-                <div className="text-white font-medium">9 Weeks Complete</div>
-                <div className="text-gray-500 text-sm">January 23, 2026 - {formatPercent(portfolioSummary.pricedReturn)} return (priced), {formatPercent(portfolioSummary.estimatedTotalReturn)} est. total</div>
+                <div className="absolute left-2.5 w-3 h-3 rounded-full bg-[#00D4AA] border-2 border-[#1a1a1a] ring-2 ring-[#00D4AA]/40"></div>
+                <div className="flex items-center gap-2">
+                  <span className="text-white font-medium">60-Day: S&T Challenges Due</span>
+                  <span className="px-1.5 py-0.5 bg-[#00D4AA]/20 text-[#00D4AA] text-[10px] rounded-full font-medium">TODAY</span>
+                </div>
+                <div className="text-gray-500 text-sm">January 23, 2026 - DOE must identify 20+ science & technology challenges across advanced manufacturing, biotech, critical materials, nuclear energy, quantum, and semiconductors</div>
               </div>
 
               <div className="relative pl-10 pb-6">
                 <div className="absolute left-2.5 w-3 h-3 rounded-full bg-[#FFB800] border-2 border-[#1a1a1a]"></div>
-                <div className="text-white font-medium">Agency Implementation Plans Due</div>
-                <div className="text-gray-500 text-sm">Q1 2026 (90 days from EO) - Watch for sector catalysts</div>
+                <div className="text-white font-medium">90-Day: Computing Resources Inventory</div>
+                <div className="text-gray-500 text-sm">February 22, 2026 - DOE identifies federal computing, storage, networking resources (on-premises + cloud HPC) and industry partnerships to support the Genesis Platform</div>
+              </div>
+
+              <div className="relative pl-10 pb-6">
+                <div className="absolute left-2.5 w-3 h-3 rounded-full bg-[#FFB800] border-2 border-[#1a1a1a]"></div>
+                <div className="text-white font-medium">120-Day: Data & Model Assets Plan</div>
+                <div className="text-gray-500 text-sm">March 24, 2026 - Initial data/model assets identified with digitization, standardization, and cybersecurity plan for incorporating datasets from federal research, academia, and private sector</div>
               </div>
 
               <div className="relative pl-10 pb-6">
                 <div className="absolute left-2.5 w-3 h-3 rounded-full bg-[#333] border-2 border-[#1a1a1a]"></div>
-                <div className="text-gray-400 font-medium">First Federal Funding Rounds</div>
-                <div className="text-gray-500 text-sm">Q2-Q3 2026 - Expected major position appreciation</div>
+                <div className="text-gray-400 font-medium">240-Day: Robotic Lab & AI Experimentation Review</div>
+                <div className="text-gray-500 text-sm">July 22, 2026 - DOE reviews capabilities across national laboratories for robotic laboratories and AI-directed experimentation facilities</div>
               </div>
 
               <div className="relative pl-10 pb-6">
                 <div className="absolute left-2.5 w-3 h-3 rounded-full bg-[#333] border-2 border-[#1a1a1a]"></div>
-                <div className="text-gray-400 font-medium">12-Month Review</div>
-                <div className="text-gray-500 text-sm">November 2026 - Rebalance and position sizing review</div>
+                <div className="text-gray-400 font-medium">270-Day: Initial Platform Operating Capability</div>
+                <div className="text-gray-500 text-sm">August 21, 2026 - DOE must demonstrate initial operating capability of the Genesis Platform for at least one national S&T challenge. Key catalyst for sector appreciation</div>
+              </div>
+
+              <div className="relative pl-10 pb-6">
+                <div className="absolute left-2.5 w-3 h-3 rounded-full bg-[#333] border-2 border-[#1a1a1a]"></div>
+                <div className="text-gray-400 font-medium">12-Month Portfolio Review</div>
+                <div className="text-gray-500 text-sm">November 2026 - Rebalance and position sizing based on EO implementation progress and sector performance</div>
               </div>
 
               <div className="relative pl-10">
                 <div className="absolute left-2.5 w-3 h-3 rounded-full bg-[#333] border-2 border-[#1a1a1a]"></div>
                 <div className="text-gray-400 font-medium">Target Exit Window</div>
-                <div className="text-gray-500 text-sm">2028-2029 - 24-36 month investment horizon</div>
+                <div className="text-gray-500 text-sm">2028-2029 - Full platform operational capability expected; 24-36 month investment horizon</div>
               </div>
             </div>
           </div>
