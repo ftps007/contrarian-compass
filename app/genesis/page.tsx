@@ -208,7 +208,9 @@ export default function GenesisPage() {
                     </Pie>
                     <Tooltip
                       formatter={(value: number) => `${value.toFixed(1)}%`}
-                      contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: '8px' }}
+                      contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', borderRadius: '8px', color: '#fff' }}
+                      itemStyle={{ color: '#ccc' }}
+                      labelStyle={{ color: '#fff', fontWeight: 600 }}
                     />
                   </PieChart>
                 </ResponsiveContainer>
