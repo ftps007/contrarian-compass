@@ -137,15 +137,16 @@ export default function Dashboard() {
 
   // Weekly performance chart data
   const capmWeeklyPct = capmExpectedReturn * 100;
+  const weekLabels = ['Jan 2', 'Jan 12', 'Jan 20'];
   const weeklyChartData = [
     ...data.weeks.slice(0, -1).map((w: any, i: number) => ({
-      week: `W${i + 1}`,
+      week: weekLabels[i] || `W${i + 1}`,
       actual: (w.weeklyReturn || 0) * 100,
       capm: capmWeeklyPct,
       isCurrent: false,
     })),
     {
-      week: `W${data.weeks.length}`,
+      week: weekLabels[data.weeks.length - 1] || `W${data.weeks.length}`,
       actual: weeklyReturn,
       capm: capmWeeklyPct,
       isCurrent: true,
