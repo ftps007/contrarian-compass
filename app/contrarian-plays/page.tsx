@@ -10,18 +10,13 @@ import {
   closedPositions,
   portfolioSummary,
   benchmarks,
+  weeklyReturns,
 } from '@/lib/contrarianData';
 
-const RATING_COLORS: Record<string, { bg: string; text: string }> = {
-  'strong buy': { bg: 'rgba(0,212,170,0.2)', text: '#00D4AA' },
-  'buy': { bg: 'rgba(0,212,170,0.15)', text: '#00D4AA' },
-  'hold': { bg: 'rgba(255,184,0,0.15)', text: '#FFB800' },
-  'sell': { bg: 'rgba(255,107,107,0.15)', text: '#FF6B6B' },
-  'strong sell': { bg: 'rgba(255,107,107,0.2)', text: '#FF6B6B' },
-};
 
 export default function ContrarianPlaysPage() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'closed'>('dashboard');
+  const [chartView, setChartView] = useState<'positions' | 'weekly'>('positions');
   const [sortKey, setSortKey] = useState<string>('return');
   const [sortCycle, setSortCycle] = useState<number>(1); // start descending
 
@@ -58,13 +53,21 @@ export default function ContrarianPlaysPage() {
   }, [sortKey, sortCycle]);
 
   // Chart data: return per position
-  const chartData = useMemo(() => {
+  const positionChartData = useMemo(() => {
     return [...openPositions]
       .sort((a, b) => b.returnPct - a.returnPct)
       .map((p) => ({
         ticker: p.ticker,
         ret: p.returnPct,
       }));
+  }, []);
+
+  // Weekly chart data
+  const weeklyChartData = useMemo(() => {
+    return weeklyReturns.map((w) => ({
+      week: w.label,
+      ret: w.ret,
+    }));
   }, []);
 
   const formatCurrency = (value: number) =>
@@ -166,11 +169,28 @@ export default function ContrarianPlaysPage() {
           <div className="bg-[#1a1a1a] rounded-2xl border border-[#252525] overflow-hidden">
             <div className="px-6 py-5 border-b border-[#252525]">
               <div className="flex items-center justify-between mb-4">
-                <span className="text-white text-sm font-medium">Position Returns</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setChartView('positions')}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                      chartView === 'positions' ? 'bg-[#333] text-white' : 'text-gray-500 hover:text-gray-300'
+                    }`}
+                  >
+                    Position Returns
+                  </button>
+                  <button
+                    onClick={() => setChartView('weekly')}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                      chartView === 'weekly' ? 'bg-[#333] text-white' : 'text-gray-500 hover:text-gray-300'
+                    }`}
+                  >
+                    Weekly Returns
+                  </button>
+                </div>
                 <span className="text-gray-500 text-xs">Hover for details</span>
               </div>
               <ResponsiveContainer width="100%" height={220}>
-                <ComposedChart data={chartData} barCategoryGap="15%">
+                <ComposedChart data={chartView === 'positions' ? positionChartData : weeklyChartData} barCategoryGap={chartView === 'positions' ? '15%' : '20%'}>
                   <defs>
                     <linearGradient id="cpBarGreen" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#00D4AA" stopOpacity={1} />
@@ -180,69 +200,101 @@ export default function ContrarianPlaysPage() {
                       <stop offset="0%" stopColor="#FF6B6B" stopOpacity={1} />
                       <stop offset="100%" stopColor="#cc4444" stopOpacity={0.7} />
                     </linearGradient>
+                    <filter id="cpGlow">
+                      <feGaussianBlur stdDeviation="3" result="blur" />
+                      <feMerge>
+                        <feMergeNode in="blur" />
+                        <feMergeNode in="SourceGraphic" />
+                      </feMerge>
+                    </filter>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1f1f1f" vertical={false} />
-                  <XAxis dataKey="ticker" stroke="transparent" tick={{ fill: '#ccc', fontSize: 10, fontWeight: 500 }} tickLine={false} />
+                  <XAxis dataKey={chartView === 'positions' ? 'ticker' : 'week'} stroke="transparent" tick={{ fill: '#ccc', fontSize: chartView === 'positions' ? 10 : 9, fontWeight: 500 }} tickLine={false} interval={chartView === 'weekly' ? 1 : 0} />
                   <YAxis stroke="transparent" tick={{ fill: '#555', fontSize: 10 }} tickLine={false} tickFormatter={(v: number) => `${v}%`} width={40} />
                   <Tooltip
                     cursor={{ fill: 'rgba(255,255,255,0.02)' }}
                     content={({ active, payload }) => {
                       if (active && payload && payload.length) {
                         const d = payload[0]?.payload;
-                        const pos = openPositions.find(p => p.ticker === d.ticker);
-                        if (!pos) return null;
-                        return (
-                          <div className="bg-[#111] border border-[#333] rounded-xl p-3.5 shadow-2xl">
-                            <p className="text-white font-bold text-sm mb-1">{pos.ticker} <span className="text-gray-400 font-normal text-xs">{pos.name}</span></p>
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between gap-4">
-                                <span className="text-gray-400 text-xs">Return</span>
-                                <span className={`font-mono text-sm font-bold ${pos.returnPct >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
-                                  {formatPercent(pos.returnPct)}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between gap-4">
-                                <span className="text-gray-400 text-xs">P/L</span>
-                                <span className={`font-mono text-sm ${pos.profitLoss >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
-                                  {formatCurrency(pos.profitLoss)}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between gap-4">
-                                <span className="text-gray-400 text-xs">Entry</span>
-                                <span className="font-mono text-sm text-gray-300">${pos.entryPrice.toFixed(2)}</span>
-                              </div>
-                              <div className="flex items-center justify-between gap-4">
-                                <span className="text-gray-400 text-xs">Rating</span>
-                                <span className="text-xs" style={{ color: RATING_COLORS[pos.rating]?.text }}>{pos.rating}</span>
+                        if (chartView === 'positions') {
+                          const pos = openPositions.find(p => p.ticker === d.ticker);
+                          if (!pos) return null;
+                          return (
+                            <div className="bg-[#111] border border-[#333] rounded-xl p-3.5 shadow-2xl">
+                              <p className="text-white font-bold text-sm mb-1">{pos.ticker} <span className="text-gray-400 font-normal text-xs">{pos.name}</span></p>
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between gap-4">
+                                  <span className="text-gray-400 text-xs">Return</span>
+                                  <span className={`font-mono text-sm font-bold ${pos.returnPct >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
+                                    {formatPercent(pos.returnPct)}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-4">
+                                  <span className="text-gray-400 text-xs">P/L</span>
+                                  <span className={`font-mono text-sm ${pos.profitLoss >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
+                                    {formatCurrency(pos.profitLoss)}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-4">
+                                  <span className="text-gray-400 text-xs">Entry</span>
+                                  <span className="font-mono text-sm text-gray-300">${pos.entryPrice.toFixed(2)}</span>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        );
+                          );
+                        } else {
+                          return (
+                            <div className="bg-[#111] border border-[#333] rounded-xl p-3.5 shadow-2xl">
+                              <p className="text-white font-bold text-sm mb-2">{d.week}</p>
+                              <div className="flex items-center justify-between gap-4">
+                                <span className="text-gray-400 text-xs">Portfolio</span>
+                                <span className={`font-mono text-sm font-bold ${d.ret >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
+                                  {d.ret >= 0 ? '+' : ''}{d.ret.toFixed(2)}%
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        }
                       }
                       return null;
                     }}
                   />
                   <ReferenceLine y={0} stroke="#333" />
-                  <ReferenceLine y={benchmarks.spx.returnPct} stroke="#555" strokeDasharray="4 4" label={{ value: 'SPX', position: 'right', fill: '#555', fontSize: 10 }} />
-                  <Bar dataKey="ret" radius={[4, 4, 0, 0]} maxBarSize={35}>
+                  {chartView === 'positions' && (
+                    <ReferenceLine y={benchmarks.spx.returnPct} stroke="#555" strokeDasharray="4 4" label={{ value: 'SPX', position: 'right', fill: '#555', fontSize: 10 }} />
+                  )}
+                  <Bar dataKey="ret" radius={[4, 4, 0, 0]} maxBarSize={chartView === 'positions' ? 35 : 28}>
                     <LabelList
                       dataKey="ret"
                       position="top"
-                      formatter={(v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(0)}%`}
+                      formatter={(v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(chartView === 'positions' ? 0 : 1)}%`}
                       style={{ fill: '#888', fontSize: 9, fontFamily: 'monospace' }}
                     />
-                    {chartData.map((d, i) => (
-                      <Cell key={i} fill={d.ret >= 0 ? 'url(#cpBarGreen)' : 'url(#cpBarRed)'} />
+                    {(chartView === 'positions' ? positionChartData : weeklyChartData).map((d, i) => (
+                      <Cell
+                        key={i}
+                        fill={d.ret >= 0 ? 'url(#cpBarGreen)' : 'url(#cpBarRed)'}
+                        style={chartView === 'weekly' && i === weeklyChartData.length - 1 ? { filter: 'url(#cpGlow)' } : {}}
+                      />
                     ))}
                   </Bar>
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
 
-            {/* Benchmark Comparison Footer */}
+            {/* Footer */}
             <div className="flex items-center justify-between px-6 py-3 bg-[#151515] text-xs text-gray-600">
-              <span>Best: BA +37.8% | Worst: PTON -23.4%</span>
-              <span>SPX: {formatPercent(benchmarks.spx.returnPct)} | NDX: {formatPercent(benchmarks.ndx.returnPct)} | DJI: {formatPercent(benchmarks.dji.returnPct)}</span>
+              {chartView === 'positions' ? (
+                <>
+                  <span>Best: BA +37.8% | Worst: PTON -23.4%</span>
+                  <span>SPX: {formatPercent(benchmarks.spx.returnPct)} | NDX: {formatPercent(benchmarks.ndx.returnPct)} | DJI: {formatPercent(benchmarks.dji.returnPct)}</span>
+                </>
+              ) : (
+                <>
+                  <span>Best: +5.8% (Jan 5) | Worst: -9.4% (Oct 6)</span>
+                  <span>{weeklyReturns.filter(w => w.ret > 0).length} green / {weeklyReturns.filter(w => w.ret <= 0).length} red weeks</span>
+                </>
+              )}
             </div>
           </div>
 
@@ -287,15 +339,7 @@ export default function ContrarianPlaysPage() {
                   {sortedPositions.map((p, idx) => (
                     <tr key={p.ticker} className={idx !== sortedPositions.length - 1 ? 'border-b border-[#252525]' : ''}>
                       <td className="py-2 pr-3">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[#00D4AA] font-mono font-medium">{p.ticker}</span>
-                          <span
-                            className="px-1.5 py-0.5 text-[10px] rounded"
-                            style={{ backgroundColor: RATING_COLORS[p.rating]?.bg, color: RATING_COLORS[p.rating]?.text }}
-                          >
-                            {p.rating}
-                          </span>
-                        </div>
+                        <span className="text-[#00D4AA] font-mono font-medium">{p.ticker}</span>
                       </td>
                       <td className="py-2 pr-3 text-gray-400 text-xs">{p.name}</td>
                       <td className="py-2 pr-3 text-gray-400 text-xs font-mono">{formatDate(p.recDate)}</td>

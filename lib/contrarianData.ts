@@ -83,3 +83,27 @@ export const exitBatches = [
   { date: '2025-12-06', label: 'Dec 6', tickers: ['WBD', 'ETSY'] },
   { date: '2026-01-08', label: 'Jan 8', tickers: ['W', 'ON'] },
 ];
+
+// Time-weighted weekly returns (calculated from historical prices)
+export const weeklyReturns = [
+  { date: '2025-09-08', label: 'Sep 8', ret: 5.01 },
+  { date: '2025-09-15', label: 'Sep 15', ret: 3.64 },
+  { date: '2025-09-22', label: 'Sep 22', ret: -0.14 },
+  { date: '2025-09-29', label: 'Sep 29', ret: 1.53 },
+  { date: '2025-10-06', label: 'Oct 6', ret: -9.44 },
+  { date: '2025-10-13', label: 'Oct 13', ret: 4.91 },
+  { date: '2025-10-20', label: 'Oct 20', ret: 4.79 },
+  { date: '2025-10-27', label: 'Oct 27', ret: 1.69 },
+  { date: '2025-11-03', label: 'Nov 3', ret: -0.01 },
+  { date: '2025-11-10', label: 'Nov 10', ret: -2.24 },
+  { date: '2025-11-17', label: 'Nov 17', ret: -2.14 },
+  { date: '2025-11-24', label: 'Nov 24', ret: 3.79 },
+  { date: '2025-12-01', label: 'Dec 1', ret: 0.57 },
+  { date: '2025-12-08', label: 'Dec 8', ret: 2.25 },
+  { date: '2025-12-15', label: 'Dec 15', ret: 0.90 },
+  { date: '2025-12-22', label: 'Dec 22', ret: 0.79 },
+  { date: '2025-12-29', label: 'Dec 29', ret: 0.13 },
+  { date: '2026-01-05', label: 'Jan 5', ret: 5.75 },
+  { date: '2026-01-12', label: 'Jan 12', ret: -0.92 },
+  { date: '2026-01-19', label: 'Jan 19', ret: 1.85 },
+];
