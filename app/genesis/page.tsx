@@ -132,7 +132,14 @@ export default function GenesisPage() {
               <div className="text-3xl">🇺🇸</div>
               <div>
                 <div className="flex items-center gap-3 mb-2">
-                  <h2 className="text-lg font-bold text-white">Genesis Mission Executive Order</h2>
+                  <a
+                    href="https://www.whitehouse.gov/presidential-actions/2025/11/launching-the-genesis-mission/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-lg font-bold text-white hover:text-[#00D4AA] transition-colors"
+                  >
+                    Genesis Mission Executive Order &rarr;
+                  </a>
                   <span className="px-2 py-0.5 bg-[#FFB800]/20 text-[#FFB800] text-xs rounded-full">Nov 24, 2025</span>
                 </div>
                 <p className="text-gray-300 text-sm leading-relaxed">
