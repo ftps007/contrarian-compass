@@ -55,12 +55,37 @@ export const portfolioSummary = {
   openPL: 9053,
   openReturnPct: 8.15,
   closedInitial: 30760,
-  closedProceeds: 44363,
+  closedProceeds: 44364,
   closedPL: 13604,
   closedReturnPct: 44.22,
   totalInvested: 141868,
   totalPL: 22657,
   totalReturnPct: 15.97,
+};
+
+// Cash flow tracking
+// Rule: No new cash injections from now on - only reinvest proceeds
+export const cashFlow = {
+  // Cash injections (out-of-pocket)
+  injections: [
+    { date: '2025-08-27', label: 'Initial Investment', amount: 53613 },
+    { date: '2025-10-03', label: 'ETSY Addition', amount: 7672 },
+    { date: '2025-11-25', label: 'Batch 2 (TSLA, BA, SAP, NVO, ON)', amount: 38175 },
+    { date: '2025-12-10', label: 'Batch 3 shortfall (after Dec 6 proceeds)', amount: 1955 },
+  ],
+  totalInjected: 101415, // Total out-of-pocket cash put in
+  // Proceeds from exits
+  proceeds: [
+    { date: '2025-12-06', label: 'WBD + ETSY sold', amount: 22997 },
+    { date: '2026-01-08', label: 'W + ON sold', amount: 21367 },
+  ],
+  totalProceeds: 44364,
+  // Cash available for reinvestment (proceeds minus subsequent purchases funded from proceeds)
+  // Dec 6: +22,997 → Dec 10: used 22,997 of 24,952 (injected 1,955 shortfall)
+  // Jan 8: +21,367 → Jan 8: used 17,456 for NKE+HD+FMC
+  availableCash: 3911, // $21,367 - $17,456 remaining from Jan 8 proceeds
+  // Total portfolio value = open positions + available cash
+  totalPortfolioValue: 120161 + 3911, // $124,072
 };
 
 export const benchmarks = {

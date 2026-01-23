@@ -11,6 +11,7 @@ import {
   portfolioSummary,
   benchmarks,
   weeklyReturns,
+  cashFlow,
 } from '@/lib/contrarianData';
 
 
@@ -82,7 +83,8 @@ export default function ContrarianPlaysPage() {
   };
 
   const totalPL = portfolioSummary.openPL + portfolioSummary.closedPL;
-  const totalReturnPct = (totalPL / portfolioSummary.totalInvested) * 100;
+  const totalReturnPct = (totalPL / cashFlow.totalInjected) * 100;
+  const totalPortfolioValue = portfolioSummary.openCurrent + cashFlow.availableCash;
 
   return (
     <div className="space-y-6 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-4 bg-[#0d0d0d] min-h-screen">
@@ -93,18 +95,23 @@ export default function ContrarianPlaysPage() {
           <p className="text-gray-500 text-xs">Inception: Aug 26, 2025 | Against quant sentiment</p>
         </div>
         <div className="text-right">
-          <div className="text-2xl font-bold text-white font-mono">{formatCurrency(portfolioSummary.openCurrent)}</div>
-          <div className="text-gray-500 text-xs mb-0.5">Open Positions</div>
+          <div className="text-2xl font-bold text-white font-mono">{formatCurrency(totalPortfolioValue)}</div>
+          <div className="text-gray-500 text-xs mb-0.5">Portfolio (stocks + cash)</div>
           <div className={`text-lg font-bold font-mono ${totalPL >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
             {formatPercent(totalReturnPct)}
             <span className="text-sm font-normal ml-1.5">({formatCurrency(totalPL)})</span>
           </div>
-          <div className="text-gray-500 text-xs">total P/L (incl. closed)</div>
+          <div className="text-gray-500 text-xs">return on capital injected</div>
         </div>
       </div>
 
       {/* Key Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="bg-[#1a1a1a] rounded-2xl p-4 border border-[#252525]">
+          <div className="text-gray-400 text-xs uppercase tracking-wider">Capital Injected</div>
+          <div className="font-semibold text-lg text-white">{formatCurrency(cashFlow.totalInjected)}</div>
+          <div className="text-gray-500 text-xs">out-of-pocket</div>
+        </div>
         <div className="bg-[#1a1a1a] rounded-2xl p-4 border border-[#252525]">
           <div className="text-gray-400 text-xs uppercase tracking-wider">Open P/L</div>
           <div className={`font-semibold text-lg ${portfolioSummary.openPL >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
@@ -113,11 +120,9 @@ export default function ContrarianPlaysPage() {
           <div className="text-gray-500 text-xs">{formatCurrency(portfolioSummary.openPL)}</div>
         </div>
         <div className="bg-[#1a1a1a] rounded-2xl p-4 border border-[#252525]">
-          <div className="text-gray-400 text-xs uppercase tracking-wider">Closed P/L</div>
-          <div className={`font-semibold text-lg ${portfolioSummary.closedPL >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
-            {formatPercent(portfolioSummary.closedReturnPct)}
-          </div>
-          <div className="text-gray-500 text-xs">{formatCurrency(portfolioSummary.closedPL)}</div>
+          <div className="text-gray-400 text-xs uppercase tracking-wider">Cash Available</div>
+          <div className="font-semibold text-lg text-[#FFB800]">{formatCurrency(cashFlow.availableCash)}</div>
+          <div className="text-gray-500 text-xs">for reinvestment</div>
         </div>
         <div className="bg-[#1a1a1a] rounded-2xl p-4 border border-[#252525]">
           <div className="text-gray-400 text-xs uppercase tracking-wider">vs S&P 500</div>
@@ -134,11 +139,6 @@ export default function ContrarianPlaysPage() {
           <div className="text-gray-500 text-xs">
             {((openPositions.filter(p => p.returnPct > 0).length + closedPositions.filter(p => p.returnPct > 0).length) / (openPositions.length + closedPositions.length) * 100).toFixed(0)}%
           </div>
-        </div>
-        <div className="bg-[#1a1a1a] rounded-2xl p-4 border border-[#252525]">
-          <div className="text-gray-400 text-xs uppercase tracking-wider">Positions</div>
-          <div className="font-semibold text-lg text-white">{openPositions.length}</div>
-          <div className="text-gray-500 text-xs">{closedPositions.length} closed</div>
         </div>
       </div>
 
