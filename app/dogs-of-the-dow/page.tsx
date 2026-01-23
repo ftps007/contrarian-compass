@@ -154,9 +154,24 @@ export default function Dashboard() {
   const displayStockValue = liveStockValue || (latestWeek.portfolioValue?.stockValue || 0);
 
   const totalReturn = ((displayPortfolioValue - data.initialCapital) / data.initialCapital) * 100;
+  const totalReturnAbs = displayPortfolioValue - data.initialCapital;
   const weeklyReturn = liveStockValue
     ? ((liveStockValue - basePortfolioValue) / basePortfolioValue) * 100
     : 0;
+
+  // Daily performance (using previousClose from Yahoo Finance)
+  const dailyChangeAbs = livePrices?.prices
+    ? (activeWeek?.targetPositions || []).reduce((sum: number, p: any) => {
+        const pd = livePrices.prices[p.ticker];
+        if (pd && pd.previousClose) {
+          return sum + p.shares * (pd.price - pd.previousClose);
+        }
+        return sum;
+      }, 0)
+    : null;
+  const dailyChangePct = dailyChangeAbs !== null && displayPortfolioValue > 0
+    ? (dailyChangeAbs / (displayPortfolioValue - dailyChangeAbs)) * 100
+    : null;
 
   // All trades since inception (using execution prices from API)
   const execDates = ['2026-01-02', '2026-01-12', '2026-01-20'];
@@ -263,18 +278,30 @@ export default function Dashboard() {
 
         {activeTab === 'dashboard' ? (
           <>
-            {/* Year | Week + Total Return */}
+            {/* Year | Week + Performance */}
             <div className="flex items-center justify-between px-6 py-5 border-b border-[#252525]">
               <div className="flex items-baseline gap-3">
                 <span className="text-4xl font-bold text-white font-mono tracking-tight">2026</span>
                 <span className="text-4xl font-light text-gray-600">|</span>
                 <span className="text-4xl font-bold text-[#00D4AA] font-mono">W{currentWeekNumber}</span>
               </div>
-              <div className="text-right">
-                <div className={`text-3xl font-bold font-mono ${totalReturn >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
-                  {totalReturn >= 0 ? '+' : ''}{totalReturn.toFixed(2)}%
+              <div className="text-right space-y-1">
+                <div>
+                  <div className={`text-2xl font-bold font-mono ${totalReturn >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
+                    {totalReturn >= 0 ? '+' : ''}{totalReturn.toFixed(2)}%
+                    <span className="text-sm ml-2">({totalReturnAbs >= 0 ? '+' : ''}{formatCurrency(totalReturnAbs)})</span>
+                  </div>
+                  <div className="text-gray-500 text-xs">seit 2.1.2026</div>
                 </div>
-                <div className="text-gray-500 text-xs">Total Return</div>
+                {dailyChangePct !== null && (
+                  <div>
+                    <div className={`text-sm font-mono ${dailyChangeAbs! >= 0 ? 'text-[#00D4AA]' : 'text-[#FF6B6B]'}`}>
+                      {dailyChangePct >= 0 ? '+' : ''}{dailyChangePct.toFixed(2)}%
+                      <span className="ml-1">({dailyChangeAbs! >= 0 ? '+' : ''}{formatCurrency(dailyChangeAbs!)})</span>
+                    </div>
+                    <div className="text-gray-500 text-xs">Heute</div>
+                  </div>
+                )}
               </div>
             </div>
 
