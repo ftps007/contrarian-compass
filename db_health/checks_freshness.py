@@ -363,6 +363,16 @@ def check_partial_load_days(ctx: Context):
         SELECT date, COUNT(*) AS n FROM price_data
          WHERE date >= %s AND date <= %s GROUP BY date ORDER BY date
     """, (ctx.window_start, ctx.today))
+
+    # A market holiday has no session, so a handful of rows dated on one is not
+    # a partial load — it is a small number of rows that should not exist at
+    # all. Reporting it as "the loader died halfway" sends you to re-run a
+    # backfill that will do nothing. Split the two apart and name each
+    # correctly. Weekends are already covered by valid.calendar_alignment.
+    holiday_rows = [(d, n) for d, n in daily
+                    if d.weekday() < 5 and not nyse.is_trading_day(d)]
+    daily = [(d, n) for d, n in daily if nyse.is_trading_day(d)]
+
     rows = []
     for i, (d, n) in enumerate(daily):
         window = [c for _, c in daily[max(0, i - 20):i]]
@@ -375,12 +385,32 @@ def check_partial_load_days(ctx: Context):
         if median > 0 and n < median * ctx.t.daily_rowcount_drop_warn:
             rows.append({"date": d, "n": n, "trailing_median": median})
     rows.sort(key=lambda r: r["date"], reverse=True)
+
+    out = []
+    if holiday_rows:
+        out.append(Finding(
+            "fresh.partial_load_days", "freshness", "No partially-loaded days",
+            Status.WARN,
+            f"{len(holiday_rows)} market holiday(s) carry price rows that "
+            f"should not exist ({sum(n for _, n in holiday_rows)} rows total)",
+            metrics={"holidays_with_rows": len(holiday_rows),
+                     "rows": sum(n for _, n in holiday_rows)},
+            samples=[{"date": d, "rows": n, "weekday": d.strftime("%A")}
+                     for d, n in sorted(holiday_rows, reverse=True)[:ctx.sample_limit]],
+            remediation="The NYSE was closed on these dates, so these bars are "
+                        "fabricated or misdated — usually a provider filling a "
+                        "holiday with the previous session. Backfilling will "
+                        "NOT fix it; delete them:\n"
+                        "  DELETE FROM price_data WHERE date = '<date>';\n"
+                        "Left in place they add phantom sessions to every "
+                        "return series that crosses them.",
+        ))
     if not rows:
-        return None
+        return out or None
     severe = [r for r in rows
               if r["n"] < r["trailing_median"] * ctx.t.daily_rowcount_drop_fail]
     status = Status.FAIL if severe else Status.WARN
-    return Finding(
+    out.append(Finding(
         "fresh.partial_load_days", "freshness", "No partially-loaded days", status,
         f"{len(rows)} day(s) below {pct(ctx.t.daily_rowcount_drop_warn)} of the "
         f"trailing-20-day median row count ({len(severe)} severe)",
@@ -393,4 +423,5 @@ def check_partial_load_days(ctx: Context):
                     "update_stock_data.py --prices-only --since <date>. The most "
                     "recent day will look partial while the market is still open "
                     "or mid-load — check the date before acting.",
-    )
+    ))
+    return out
