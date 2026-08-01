@@ -48,6 +48,19 @@ Usage
     # repair a ticker completely (splits, adjustments, everything)
     python pipeline/backfill_ticker.py GWAV --all --apply
 
+Safety
+------
+A gap repair must never end with FEWER rows than it started with. That is the
+invariant, and it is enforced before any DELETE runs: the fetch happens first,
+and if it returns fewer rows than are already stored -- or less than
+--min-fill of the range's NYSE sessions -- the ticker is left untouched.
+
+This matters because a rate-limited Yahoo does not return an error. It returns
+a *thin* frame, often a single bar, which is indistinguishable from a real
+answer unless you count it. An earlier version of this script only checked for
+an empty response; a one-row reply passed that test and replaced six full
+series with one bar each. Hence: count, compare, retry, and refuse.
+
 Deliberately sequential with a pause between tickers. This is a repair tool
 run on a handful of names, not a bulk loader; the failure mode it replaces was
 caused by too much concurrency.
@@ -63,6 +76,9 @@ from datetime import date, timedelta
 
 import psycopg2
 from psycopg2.extras import execute_values
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from db_health.nyse_calendar import trading_days as nyse_sessions  # noqa: E402
 
 
 def db_connect(args):
@@ -104,7 +120,29 @@ def describe(cur, stock_id: int, lo: date, hi: date) -> dict:
     return {"rows": n, "first": mn, "last": mx, "null_closes": nulls}
 
 
-def fetch(ticker: str, lo: date, hi: date):
+def fetch(ticker: str, lo: date, hi: date, *, attempts: int = 3,
+          backoff: float = 8.0):
+    """Fetch one ticker, retrying a thin response.
+
+    Yahoo answers a rate-limited request with a near-empty frame rather than
+    an error, so "few rows" and "genuinely few bars" look identical on a
+    single try. Retrying separates them: throttling clears, sparse history
+    does not.
+    """
+    best: list = []
+    for attempt in range(1, attempts + 1):
+        rows = _fetch_once(ticker, lo, hi)
+        if len(rows) > len(best):
+            best = rows
+        expected = len(nyse_sessions(lo, min(hi, date.today())))
+        if expected and len(best) >= expected * 0.9:
+            break
+        if attempt < attempts:
+            time.sleep(backoff * attempt)
+    return best
+
+
+def _fetch_once(ticker: str, lo: date, hi: date):
     """One ticker, one request. Returns a list of insertable tuples."""
     import yfinance as yf
     df = yf.download(
@@ -147,8 +185,17 @@ def main(argv=None) -> int:
                    help="repair the ticker's entire history")
     p.add_argument("--apply", action="store_true",
                    help="execute; without it nothing is written")
-    p.add_argument("--pause", type=float, default=1.5,
-                   help="seconds between tickers (default 1.5)")
+    p.add_argument("--pause", type=float, default=4.0,
+                   help="seconds between tickers (default 4.0). Yahoo throttles "
+                        "aggressively; going faster is what causes thin "
+                        "responses in the first place.")
+    p.add_argument("--min-fill", type=float, default=0.9,
+                   help="refuse to replace a series unless the fetch returns "
+                        "at least this fraction of the range's NYSE sessions "
+                        "(default 0.9)")
+    p.add_argument("--force", action="store_true",
+                   help="override the thin-response guard. Only for symbols "
+                        "that genuinely have sparse history.")
     p.add_argument("--dsn")
     p.add_argument("--dbname", default=os.environ.get("STOCK_DB_NAME", "stock_data"))
     p.add_argument("--user", default=os.environ.get("STOCK_DB_USER",
@@ -201,12 +248,22 @@ def main(argv=None) -> int:
             print(f"             {exc}")
             continue
 
-        if not rows:
-            # Delete nothing. An empty response is far more likely to mean a
-            # renamed or delisted symbol than a genuinely empty range, and
-            # wiping good history on that basis is unrecoverable.
+        # ── The guard that matters ────────────────────────────────────────
+        # A gap repair must never end with FEWER rows than it started with.
+        # Checking only for an empty response is not enough: a throttled or
+        # rate-limited provider returns a *thin* frame — one or two bars —
+        # which passes an emptiness test and then replaces a full series with
+        # nothing. Compare against both what is already stored and how many
+        # sessions the range actually had.
+        expected = len(nyse_sessions(lo, min(hi, date.today())))
+        too_thin = len(rows) < before["rows"] or (
+            expected and len(rows) < expected * args.min_fill)
+        if too_thin and not args.force:
             print(f"  {t:<10}{before['rows']:>10,}"
-                  f"{'no data returned — kept as is':>34}")
+                  f"{f'REFUSED: fetch returned {len(rows)} of ~{expected}':>34}")
+            print(f"             keeping the {before['rows']:,} existing rows. "
+                  f"Provider is likely throttling — retry later, or --force "
+                  f"if the symbol really is that sparse.")
             continue
 
         cur.execute("DELETE FROM price_data WHERE stock_id = %s "
