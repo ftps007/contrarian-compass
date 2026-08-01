@@ -123,6 +123,25 @@ def extract_tickers(df: pd.DataFrame, col) -> list[str]:
     return sorted(set(s.str.replace(".", "-", regex=False)))
 
 
+def extract_from_table(df: pd.DataFrame) -> list[str]:
+    """Tickers from a single already-selected table.
+
+    Used for the cache path: a cached table was chosen once and does not need
+    re-selecting, but it does still need the same cleaning as a fresh fetch —
+    footnotes, dots, stray non-ticker rows. Keeping one extraction routine for
+    both paths is what stops a cached universe and a fresh one from differing.
+    """
+    cols = ticker_columns(df)
+    if not cols:
+        raise ValueError(f"no ticker column in {list(df.columns)[:8]}")
+    best: list[str] = []
+    for c in cols:
+        t = extract_tickers(df, c)
+        if len(t) > len(best):
+            best = t
+    return best
+
+
 def candidates(html: str) -> list[tuple[int, object, list[str]]]:
     """Every (table index, column, tickers) worth considering, in page order."""
     try:
