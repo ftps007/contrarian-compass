@@ -1,16 +1,27 @@
 #!/bin/bash
 #
-# Wraps the standalone HTML in a macOS .app bundle so the editor can be started
-# from the Finder, Launchpad or Spotlight like any other program.
+# Installs the metadata editor as a macOS app, so it can be started from
+# Launchpad, Spotlight or the app switcher instead of from a file in the Finder.
 #
-#   ./standalone/build-app.sh              -> standalone/Metadaten-Editor.app
-#   ./standalone/build-app.sh ~/Applications
+#   ./standalone/build-app.sh              -> ~/Applications (shows up in Launchpad)
+#   ./standalone/build-app.sh --open       -> install and start it right away
+#   ./standalone/build-app.sh /Applications
 #
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HTML="$HERE/Metadaten-Editor.html"
-TARGET_DIR="${1:-$HERE}"
+ICON="$HERE/icon.icns"
+
+OPEN_AFTER=false
+TARGET_DIR=""
+for arg in "$@"; do
+  case "$arg" in
+    --open) OPEN_AFTER=true ;;
+    *) TARGET_DIR="$arg" ;;
+  esac
+done
+TARGET_DIR="${TARGET_DIR:-$HOME/Applications}"
 APP="$TARGET_DIR/Metadaten-Editor.app"
 
 if [ ! -f "$HTML" ]; then
@@ -18,9 +29,16 @@ if [ ! -f "$HTML" ]; then
   exit 1
 fi
 
+mkdir -p "$TARGET_DIR"
+if [ ! -w "$TARGET_DIR" ]; then
+  echo "Keine Schreibrechte für $TARGET_DIR — noch einmal mit sudo aufrufen." >&2
+  exit 1
+fi
+
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$HTML" "$APP/Contents/Resources/Metadaten-Editor.html"
+[ -f "$ICON" ] && cp "$ICON" "$APP/Contents/Resources/icon.icns"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -34,6 +52,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>metadaten-editor</string>
+  <key>CFBundleIconFile</key><string>icon</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict>
 </plist>
@@ -41,15 +60,43 @@ PLIST
 
 cat > "$APP/Contents/MacOS/metadaten-editor" <<'LAUNCHER'
 #!/bin/bash
-# Opens the bundled page in the default browser. A file dragged onto the app
-# icon is passed along as an argument — we only use it to show the folder,
-# since the browser has to receive the file through the page itself.
+# Shows the bundled page. With a Chrome-family browser installed it runs in its
+# own window without tabs or address bar, in a browser profile used by nothing
+# else. Otherwise it falls back to the default browser.
 RESOURCES="$(cd "$(dirname "${BASH_SOURCE[0]}")/../Resources" && pwd)"
-open "$RESOURCES/Metadaten-Editor.html"
+PAGE="file://$RESOURCES/Metadaten-Editor.html"
+PROFILE="$HOME/Library/Application Support/Metadaten-Editor/browser"
+
+while IFS= read -r BROWSER; do
+  if [ -x "$BROWSER" ]; then
+    mkdir -p "$PROFILE"
+    exec "$BROWSER" \
+      --app="$PAGE" \
+      --user-data-dir="$PROFILE" \
+      --window-size=1180,900 \
+      --no-first-run \
+      --no-default-browser-check
+  fi
+done <<'BROWSERS'
+/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge
+/Applications/Brave Browser.app/Contents/MacOS/Brave Browser
+/Applications/Chromium.app/Contents/MacOS/Chromium
+BROWSERS
+
+open "$PAGE"
 LAUNCHER
 
 chmod +x "$APP/Contents/MacOS/metadaten-editor"
 
-echo "Fertig: $APP"
-echo "Zum Installieren ins Programme-Verzeichnis ziehen — oder gleich:"
-echo "  ./standalone/build-app.sh ~/Applications"
+# Nudge Launch Services so the app turns up in Launchpad and Spotlight at once.
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [ -x "$LSREGISTER" ]; then "$LSREGISTER" -f "$APP" >/dev/null 2>&1 || true; fi
+touch "$APP" 2>/dev/null || true
+
+echo "Installiert: $APP"
+echo "Zu finden über Launchpad, Spotlight (cmd+Leertaste) oder den Programme-Ordner."
+
+if [ "$OPEN_AFTER" = true ]; then
+  open "$APP"
+fi

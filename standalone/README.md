@@ -1,43 +1,62 @@
-# Metadaten-Editor — Version zum Starten aus dem Finder
+# Metadaten-Editor als Mac-App
 
-`Metadaten-Editor.html` ist eine einzelne, in sich geschlossene Datei: kein Server, keine
-Installation, keine Internetverbindung. Doppelklick im Finder genügt — die Datei öffnet sich im
-Standardbrowser, und die Office-Datei wird per Drag & Drop hineingezogen.
-
-Die Verarbeitung passiert komplett im Browserfenster. Es wird nichts hochgeladen; die bearbeitete
-Datei landet im Download-Ordner.
-
-## Als richtige App im Programme-Verzeichnis
+## Installieren
 
 ```
-./standalone/build-app.sh ~/Applications
+./standalone/build-app.sh --open
 ```
 
-Erzeugt `Metadaten-Editor.app` — danach über Launchpad, Spotlight oder das Dock startbar. Ohne
-Argument landet die App neben der HTML-Datei in `standalone/`.
+Legt `Metadaten-Editor.app` in `~/Applications` an, registriert sie bei Launch Services und startet
+sie gleich. Danach ist sie über Launchpad, Spotlight (cmd+Leertaste) und den App-Umschalter
+erreichbar wie jedes andere Programm — der Finder wird nicht gebraucht.
 
-Das Bundle enthält nur ein Startskript und die HTML-Datei; ein per Drag & Drop auf das App-Icon
-gezogenes Dokument wird *nicht* übernommen, das Ziehen muss im geöffneten Fenster passieren.
+Für alle Benutzer des Rechners stattdessen:
+
+```
+sudo ./standalone/build-app.sh /Applications
+```
 
 Weil die App lokal erzeugt wird, hat sie kein Gatekeeper-Quarantäneflag und startet ohne
-Sicherheitsnachfrage.
+Sicherheitsnachfrage. Deinstallieren heißt: App in den Papierkorb ziehen.
+
+## Wie sie läuft
+
+Die App ist ein Bundle um eine einzelne HTML-Datei — kein Server, kein Netz, keine Laufzeit-
+Abhängigkeit. Ist Chrome, Edge, Brave oder Chromium installiert, öffnet sie sich in einem eigenen
+Fenster ohne Tabs und Adresszeile, in einem separaten Browserprofil unter
+`~/Library/Application Support/Metadaten-Editor/`, das sonst nichts benutzt. Ohne einen dieser
+Browser fällt sie auf den Standardbrowser zurück und erscheint dort als normaler Tab.
+
+Weil die Anzeige ein Browser übernimmt, kann im Dock der Name bzw. das Symbol des Browsers stehen
+statt das der App — das wäre nur mit einer nativen Hülle (Electron & Co.) zu ändern, die aus
+40 KB rund 200 MB machen würde.
+
+Ein Dokument, das auf das App-Symbol gezogen wird, nimmt die App bewusst nicht an: ein Browser
+lässt sich von außen keine Datei in die Seite reichen. Das Ziehen passiert im geöffneten Fenster,
+irgendwo hin — das ganze Fenster ist eine Ablagefläche.
+
+Die fertige Datei landet im Download-Ordner. Falls der Fallback-Browser Safari sie in einem Tab
+anzeigt statt sie zu sichern, hilft es, Chrome zu installieren; dann greift der Fensterpfad oben.
+
+Gebraucht wird die `CompressionStream`-API: Safari 16.4+, Chrome/Edge 80+, Firefox 113+. Ältere
+Browser bekommen einen Hinweis statt einer kaputten Oberfläche.
+
+## Ohne Installation
+
+`standalone/Metadaten-Editor.html` funktioniert auch direkt per Doppelklick — dieselbe Datei, die
+im Bundle steckt.
 
 ## Neu bauen
 
 ```
-npm run build:standalone
+npm run build:standalone     # bündelt lib/ + standalone/app.js -> Metadaten-Editor.html
+python3 standalone/make-icon.py   # nur nötig, wenn das Icon geändert wird
+./standalone/build-app.sh    # App neu bauen und installieren
 ```
 
-Bündelt `standalone/app.js` samt der gemeinsam genutzten Logik aus `lib/` per esbuild in
-`standalone/template.html` und schreibt `standalone/Metadaten-Editor.html`. Die fertige HTML-Datei
-ist eingecheckt, der Schritt ist also nur nach Änderungen an `lib/` oder der Oberfläche nötig.
+`build:standalone` bündelt `standalone/app.js` samt der gemeinsam genutzten Logik aus `lib/` per
+esbuild in `standalone/template.html`. Die fertige HTML-Datei und das Icon sind eingecheckt, die
+Schritte sind also nur nach Änderungen nötig.
 
 Dieselbe Logik steckt hinter der Seite `/metadaten` der Web-App — geteilt werden `lib/zip.ts` und
 `lib/officeMetadata.ts`, doppelt vorhanden ist nur die Oberfläche (React bzw. Vanilla-JS).
-
-## Browser
-
-Gebraucht wird die `CompressionStream`-API: Safari 16.4+, Chrome/Edge 80+, Firefox 113+. Ältere
-Browser bekommen einen entsprechenden Hinweis statt einer kaputten Oberfläche. Falls Safari die
-fertige Datei in einem Tab anzeigt statt sie zu sichern, die HTML-Datei einmal mit Chrome öffnen
-(Rechtsklick → „Öffnen mit").
