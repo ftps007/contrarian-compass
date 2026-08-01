@@ -302,7 +302,9 @@ def check_split_artifacts(ctx: Context):
         f"{len(affected_universe)} are active {ctx.member_label}s",
         metrics={"count": len(rows),
                  "tickers": len({r["ticker"] for r in rows}),
-                 "universe_tickers": affected_universe[:50]},
+                 # Not truncated: this list is the input to the repair, so a
+                 # cap here would silently leave tickers unfixed.
+                 "universe_tickers": affected_universe},
         samples=rows[:ctx.sample_limit],
         remediation="THIS IS THE ONE TO FIX FIRST. A stale split leaves a "
                     "permanent fake crash in the series, and a contrarian "

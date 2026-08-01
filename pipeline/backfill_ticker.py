@@ -255,12 +255,22 @@ def main(argv=None) -> int:
         # which passes an emptiness test and then replaces a full series with
         # nothing. Compare against both what is already stored and how many
         # sessions the range actually had.
-        expected = len(nyse_sessions(lo, min(hi, date.today())))
+        #
+        # The session-count comparison only makes sense for a BOUNDED range,
+        # where we know how many bars should exist. With --all the range runs
+        # from 1900, ~31,900 sessions, and no ticker has been listed that long
+        # — every repair would look 90% short and be refused. There the
+        # never-lose-rows rule is the guard on its own, and it is the stronger
+        # of the two anyway: a throttled reply is one or two bars against
+        # hundreds already stored.
+        expected = 0 if args.all else len(nyse_sessions(lo, min(hi, date.today())))
         too_thin = len(rows) < before["rows"] or (
             expected and len(rows) < expected * args.min_fill)
         if too_thin and not args.force:
-            print(f"  {t:<10}{before['rows']:>10,}"
-                  f"{f'REFUSED: fetch returned {len(rows)} of ~{expected}':>34}")
+            why = (f"REFUSED: got {len(rows)} < {before['rows']} stored"
+                   if len(rows) < before["rows"]
+                   else f"REFUSED: got {len(rows)} of ~{expected} sessions")
+            print(f"  {t:<10}{before['rows']:>10,}{why:>34}")
             print(f"             keeping the {before['rows']:,} existing rows. "
                   f"Provider is likely throttling — retry later, or --force "
                   f"if the symbol really is that sparse.")
