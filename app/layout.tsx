@@ -43,6 +43,9 @@ export default function RootLayout({
                 <Link href="/genesis" className="text-stone-600 hover:text-amber-800 hover:bg-stone-200 px-3 py-2 rounded-md transition-colors">
                   Genesis
                 </Link>
+                <Link href="/metadaten" className="text-stone-600 hover:text-amber-800 hover:bg-stone-200 px-3 py-2 rounded-md transition-colors">
+                  Metadaten
+                </Link>
               </div>
             </div>
           </div>
