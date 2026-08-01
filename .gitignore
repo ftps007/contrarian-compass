@@ -27,6 +27,9 @@ yarn-error.log*
 *.swp
 *.swo
 
+# Generierte macOS-App des Metadaten-Editors
+standalone/Metadaten-Editor.app/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -1,0 +1,1003 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Metadaten-Editor</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --stone-50: #fafaf9;
+        --stone-100: #f5f5f4;
+        --stone-200: #e7e5e4;
+        --stone-300: #d6d3d1;
+        --stone-500: #78716c;
+        --stone-600: #57534e;
+        --stone-700: #44403c;
+        --stone-800: #292524;
+        --amber-700: #b45309;
+        --amber-800: #92400e;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 2rem 1.5rem 4rem;
+        background: var(--stone-50);
+        color: var(--stone-800);
+        font: 15px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      }
+      main { max-width: 68rem; margin: 0 auto; }
+      h1 { font-size: 1.75rem; margin: 0 0 .5rem; }
+      h2 { font-size: 1.15rem; margin: 0 0 1rem; }
+      p { margin: 0 0 .75rem; }
+      .lede { color: var(--stone-600); margin-bottom: 2rem; }
+      .hidden { display: none !important; }
+      .hint { color: var(--stone-500); font-size: .8125rem; margin: .25rem 0 0; }
+
+      #dropzone {
+        border: 2px dashed var(--stone-300);
+        background: var(--stone-100);
+        border-radius: .5rem;
+        padding: 2.5rem 1rem;
+        text-align: center;
+        cursor: pointer;
+        transition: border-color .15s, background .15s;
+      }
+      #dropzone:hover { border-color: var(--amber-700); }
+      #dropzone.dragging { border-color: var(--amber-800); background: #fffbeb; }
+      #dropzone-name { font-size: 1.05rem; font-weight: 600; color: var(--stone-700); }
+      #dropzone-formats { color: var(--stone-500); font-size: .8125rem; margin-top: .35rem; }
+
+      .message { border-radius: .375rem; padding: .75rem 1rem; margin-top: 1.5rem; font-size: .875rem; }
+      .message.info { border: 1px solid #fcd34d; background: #fffbeb; color: #78350f; }
+      .message.error { border: 1px solid #fca5a5; background: #fef2f2; color: #991b1b; }
+
+      section {
+        border: 1px solid var(--stone-200);
+        background: #fff;
+        border-radius: .5rem;
+        padding: 1.5rem;
+        margin-top: 1.5rem;
+      }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+      @media (max-width: 45rem) { .grid { grid-template-columns: 1fr; } }
+      .field.wide { grid-column: 1 / -1; }
+      .field label { display: block; font-size: .8125rem; font-weight: 600; color: var(--stone-600); margin-bottom: .25rem; }
+      .field input, .field textarea {
+        width: 100%;
+        border: 1px solid var(--stone-300);
+        border-radius: .375rem;
+        padding: .5rem .625rem;
+        font: inherit;
+        font-size: .875rem;
+        background: #fff;
+      }
+      .field input:focus, .field textarea:focus { outline: none; border-color: var(--amber-700); }
+      .custom-row { display: flex; align-items: flex-end; gap: .75rem; margin-bottom: .75rem; }
+      .custom-row .field { flex: 1; }
+
+      .actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1.5rem; }
+      button {
+        font: inherit;
+        font-size: .875rem;
+        border: none;
+        border-radius: .375rem;
+        padding: .5rem .9rem;
+        background: var(--stone-200);
+        color: var(--stone-700);
+        cursor: pointer;
+      }
+      button:hover { background: var(--stone-300); }
+      button.primary { background: var(--amber-800); color: #fff; padding: .75rem 1.5rem; font-weight: 600; }
+      button.primary:hover { background: #7c2d12; }
+      button:disabled { opacity: .5; cursor: default; }
+      button.ghost { background: var(--stone-200); }
+      button.danger:hover { background: #fee2e2; color: #991b1b; }
+      #revert { background: none; color: var(--stone-600); text-decoration: underline; padding-left: 0; }
+
+      .check { display: flex; gap: .75rem; margin-bottom: .85rem; }
+      .check input { margin-top: .25rem; accent-color: var(--amber-800); }
+      .check-label { display: block; font-size: .875rem; font-weight: 600; color: var(--stone-700); }
+
+      #traces { list-style: none; margin: 0; padding: 0; }
+      #traces li { border-left: 2px solid var(--stone-300); padding-left: .75rem; margin-bottom: .85rem; }
+      .trace-label { font-size: .875rem; font-weight: 600; color: var(--stone-700); margin: 0; }
+      .badge {
+        margin-left: .5rem;
+        background: #fee2e2;
+        color: #991b1b;
+        border-radius: .25rem;
+        padding: .1rem .4rem;
+        font-size: .6875rem;
+        font-weight: 500;
+      }
+
+      .save-row { display: flex; align-items: center; gap: 1rem; margin-top: 1.5rem; }
+      .notice { background: var(--stone-100); border: 1px solid var(--stone-300); }
+      .notice ul { margin: 0 0 .75rem; padding-left: 1.25rem; color: var(--stone-600); font-size: .875rem; }
+      .notice li { margin-bottom: .25rem; }
+      .notice p { color: var(--stone-600); font-size: .875rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Metadaten-Editor</h1>
+      <p class="lede">
+        Office-Datei hierher ziehen, Eigenschaften bearbeiten, neu speichern. Alles passiert lokal in diesem
+        Fenster — es wird nichts hochgeladen, und es läuft ohne Internetverbindung.
+      </p>
+
+      <div id="dropzone">
+        <div id="dropzone-name">Datei hierher ziehen oder klicken</div>
+        <div id="dropzone-formats"></div>
+        <input type="file" id="file-input" class="hidden" />
+      </div>
+
+      <div id="message" class="hidden"></div>
+
+      <div id="editor" class="hidden">
+        <div class="actions">
+          <button id="clear-all">Alle Felder leeren</button>
+          <button id="same-author">Autor auch als „zuletzt geändert von"</button>
+          <button id="reset-counters">Zähler zurücksetzen</button>
+          <button id="now">Datum auf jetzt</button>
+        </div>
+
+        <section>
+          <h2>Dokumenteigenschaften</h2>
+          <div id="core-fields" class="grid"></div>
+        </section>
+
+        <section>
+          <h2>Erweiterte Eigenschaften</h2>
+          <div id="app-fields" class="grid"></div>
+        </section>
+
+        <section id="custom-section" class="hidden">
+          <h2>Benutzerdefinierte Eigenschaften</h2>
+          <div id="custom-props"></div>
+        </section>
+
+        <section>
+          <h2>Zusätzliche Spuren</h2>
+          <div id="cleanup"></div>
+        </section>
+
+        <section>
+          <h2>In dieser Datei gefunden</h2>
+          <ul id="traces"></ul>
+        </section>
+
+        <div class="save-row">
+          <button id="save" class="primary">Bearbeitete Datei speichern</button>
+          <button id="revert">Änderungen verwerfen</button>
+        </div>
+      </div>
+
+      <section class="notice">
+        <h2>Was dieses Tool nicht kann</h2>
+        <p>
+          Bearbeitete Metadaten sind kein sauberer Zustand — sie sind ein bearbeiteter Zustand. Außerhalb der Datei
+          bleiben Spuren, an die kein Editor herankommt:
+        </p>
+        <ul>
+          <li>Zeitstempel des Dateisystems (Erstellt/Geändert/Zugriff) — beim Speichern immer neu gesetzt.</li>
+          <li>Versionsverlauf in OneDrive, SharePoint, Google Drive, Dropbox oder einem DMS.</li>
+          <li>Kopien, die bereits per Mail, Chat oder Backup verschickt wurden.</li>
+          <li>
+            Kompressionsmerkmale: die Datei wird hier neu gepackt, das unterscheidet sich messbar von einer
+            Original-Word-Datei.
+          </li>
+          <li>Inhaltliche Spuren wie nachverfolgte Änderungen oder in Bildern eingebettete EXIF-Daten.</li>
+        </ul>
+        <p>
+          Für den eigentlichen Zweck — persönliche Daten vor der Weitergabe eines Dokuments entfernen — reicht das
+          hier vollständig aus. Als Nachweis gegenüber Dritten, dass ein Dokument zu einem bestimmten Zeitpunkt
+          entstanden ist, taugen manipulierte Metadaten nicht: Rückdatierung fällt in forensischen Prüfungen
+          regelmäßig auf und ist im rechtlichen Kontext strafbar.
+        </p>
+      </section>
+    </main>
+    <script>
+"use strict";
+(() => {
+  // lib/zip.ts
+  var SIG_LOCAL = 67324752;
+  var SIG_CENTRAL = 33639248;
+  var SIG_EOCD = 101010256;
+  var CRC_TABLE = (() => {
+    const table = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 3988292384 ^ c >>> 1 : c >>> 1;
+      table[i] = c >>> 0;
+    }
+    return table;
+  })();
+  function crc32(bytes) {
+    let c = 4294967295;
+    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 255] ^ c >>> 8;
+    return (c ^ 4294967295) >>> 0;
+  }
+  async function inflateRaw(bytes) {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  async function deflateRaw(bytes) {
+    const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  function toDosDateTime(date) {
+    const year = Math.max(1980, date.getFullYear());
+    const dosDate = year - 1980 << 9 | date.getMonth() + 1 << 5 | date.getDate();
+    const dosTime = date.getHours() << 11 | date.getMinutes() << 5 | date.getSeconds() >> 1;
+    return { dosTime, dosDate };
+  }
+  async function readZip(buffer) {
+    const view = new DataView(buffer);
+    const bytes = new Uint8Array(buffer);
+    let eocd = -1;
+    const scanStart = Math.max(0, bytes.length - 65535 - 22);
+    for (let i = bytes.length - 22; i >= scanStart; i--) {
+      if (view.getUint32(i, true) === SIG_EOCD) {
+        eocd = i;
+        break;
+      }
+    }
+    if (eocd < 0) throw new Error("Keine g\xFCltige ZIP-Struktur gefunden \u2014 ist das wirklich eine Office-Datei?");
+    const entryCount = view.getUint16(eocd + 10, true);
+    let offset = view.getUint32(eocd + 16, true);
+    if (offset === 4294967295) throw new Error("ZIP64-Archive werden nicht unterst\xFCtzt.");
+    const entries = [];
+    for (let i = 0; i < entryCount; i++) {
+      if (view.getUint32(offset, true) !== SIG_CENTRAL) throw new Error("Besch\xE4digtes Central Directory.");
+      const method = view.getUint16(offset + 10, true);
+      const dosTime = view.getUint16(offset + 12, true);
+      const dosDate = view.getUint16(offset + 14, true);
+      const compressedSize = view.getUint32(offset + 20, true);
+      const nameLength = view.getUint16(offset + 28, true);
+      const extraLength = view.getUint16(offset + 30, true);
+      const commentLength = view.getUint16(offset + 32, true);
+      const externalAttr = view.getUint32(offset + 38, true);
+      const localOffset = view.getUint32(offset + 42, true);
+      const name = new TextDecoder().decode(bytes.subarray(offset + 46, offset + 46 + nameLength));
+      if (view.getUint32(localOffset, true) !== SIG_LOCAL) throw new Error(`Besch\xE4digter Local Header: ${name}`);
+      const localNameLength = view.getUint16(localOffset + 26, true);
+      const localExtraLength = view.getUint16(localOffset + 28, true);
+      const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+      const raw = bytes.subarray(dataStart, dataStart + compressedSize);
+      if (!name.endsWith("/")) {
+        entries.push({
+          name,
+          data: method === 8 ? await inflateRaw(raw) : new Uint8Array(raw),
+          method,
+          dosTime,
+          dosDate,
+          externalAttr
+        });
+      }
+      offset += 46 + nameLength + extraLength + commentLength;
+    }
+    return entries;
+  }
+  async function writeZip(entries, timestamp) {
+    const encoder2 = new TextEncoder();
+    const localChunks = [];
+    const centralChunks = [];
+    let offset = 0;
+    for (const entry of entries) {
+      const nameBytes = encoder2.encode(entry.name);
+      const crc = crc32(entry.data);
+      const deflated = entry.data.length > 0 ? await deflateRaw(entry.data) : new Uint8Array(0);
+      const useDeflate = deflated.length < entry.data.length;
+      const payload = useDeflate ? deflated : entry.data;
+      const method = useDeflate ? 8 : 0;
+      const { dosTime, dosDate } = timestamp ? toDosDateTime(timestamp) : { dosTime: entry.dosTime, dosDate: entry.dosDate };
+      const local = new Uint8Array(30 + nameBytes.length);
+      const localView = new DataView(local.buffer);
+      localView.setUint32(0, SIG_LOCAL, true);
+      localView.setUint16(4, 20, true);
+      localView.setUint16(6, 2048, true);
+      localView.setUint16(8, method, true);
+      localView.setUint16(10, dosTime, true);
+      localView.setUint16(12, dosDate, true);
+      localView.setUint32(14, crc, true);
+      localView.setUint32(18, payload.length, true);
+      localView.setUint32(22, entry.data.length, true);
+      localView.setUint16(26, nameBytes.length, true);
+      localView.setUint16(28, 0, true);
+      local.set(nameBytes, 30);
+      const central = new Uint8Array(46 + nameBytes.length);
+      const centralView = new DataView(central.buffer);
+      centralView.setUint32(0, SIG_CENTRAL, true);
+      centralView.setUint16(4, 20, true);
+      centralView.setUint16(6, 20, true);
+      centralView.setUint16(8, 2048, true);
+      centralView.setUint16(10, method, true);
+      centralView.setUint16(12, dosTime, true);
+      centralView.setUint16(14, dosDate, true);
+      centralView.setUint32(16, crc, true);
+      centralView.setUint32(20, payload.length, true);
+      centralView.setUint32(24, entry.data.length, true);
+      centralView.setUint16(28, nameBytes.length, true);
+      centralView.setUint32(38, entry.externalAttr, true);
+      centralView.setUint32(42, offset, true);
+      central.set(nameBytes, 46);
+      localChunks.push(local, payload);
+      centralChunks.push(central);
+      offset += local.length + payload.length;
+    }
+    const centralSize = centralChunks.reduce((sum, c) => sum + c.length, 0);
+    const eocd = new Uint8Array(22);
+    const eocdView = new DataView(eocd.buffer);
+    eocdView.setUint32(0, SIG_EOCD, true);
+    eocdView.setUint16(8, entries.length, true);
+    eocdView.setUint16(10, entries.length, true);
+    eocdView.setUint32(12, centralSize, true);
+    eocdView.setUint32(16, offset, true);
+    return new Blob([...localChunks, ...centralChunks, eocd], {
+      type: "application/octet-stream"
+    });
+  }
+
+  // lib/officeMetadata.ts
+  var NS = {
+    cp: "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
+    dc: "http://purl.org/dc/elements/1.1/",
+    dcterms: "http://purl.org/dc/terms/",
+    dcmitype: "http://purl.org/dc/dcmitype/",
+    xsi: "http://www.w3.org/2001/XMLSchema-instance",
+    ep: "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
+    vt: "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
+    ct: "http://schemas.openxmlformats.org/package/2006/content-types",
+    rel: "http://schemas.openxmlformats.org/package/2006/relationships",
+    custom: "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties"
+  };
+  var CORE_PART = "docProps/core.xml";
+  var APP_PART = "docProps/app.xml";
+  var CUSTOM_PART = "docProps/custom.xml";
+  var CONTENT_TYPES = "[Content_Types].xml";
+  var FIELDS = [
+    { key: "title", label: "Titel", kind: "text", part: "core", ns: NS.dc, prefix: "dc", tag: "title" },
+    { key: "subject", label: "Thema", kind: "text", part: "core", ns: NS.dc, prefix: "dc", tag: "subject" },
+    { key: "creator", label: "Autor", hint: "dc:creator \u2014 der urspr\xFCngliche Verfasser", kind: "text", part: "core", ns: NS.dc, prefix: "dc", tag: "creator" },
+    { key: "lastModifiedBy", label: "Zuletzt ge\xE4ndert von", kind: "text", part: "core", ns: NS.cp, prefix: "cp", tag: "lastModifiedBy" },
+    { key: "keywords", label: "Stichw\xF6rter", kind: "text", part: "core", ns: NS.cp, prefix: "cp", tag: "keywords" },
+    { key: "description", label: "Kommentare", kind: "longtext", part: "core", ns: NS.dc, prefix: "dc", tag: "description" },
+    { key: "category", label: "Kategorie", kind: "text", part: "core", ns: NS.cp, prefix: "cp", tag: "category" },
+    { key: "contentStatus", label: "Status", kind: "text", part: "core", ns: NS.cp, prefix: "cp", tag: "contentStatus" },
+    { key: "revision", label: "Revisionsnummer", hint: "Wie oft das Dokument gespeichert wurde", kind: "number", part: "core", ns: NS.cp, prefix: "cp", tag: "revision" },
+    { key: "version", label: "Version", kind: "text", part: "core", ns: NS.cp, prefix: "cp", tag: "version" },
+    { key: "language", label: "Sprache", kind: "text", part: "core", ns: NS.dc, prefix: "dc", tag: "language" },
+    { key: "created", label: "Erstellt am", kind: "datetime", part: "core", ns: NS.dcterms, prefix: "dcterms", tag: "created", w3cdtf: true },
+    { key: "modified", label: "Ge\xE4ndert am", kind: "datetime", part: "core", ns: NS.dcterms, prefix: "dcterms", tag: "modified", w3cdtf: true },
+    { key: "lastPrinted", label: "Zuletzt gedruckt", kind: "datetime", part: "core", ns: NS.cp, prefix: "cp", tag: "lastPrinted" },
+    { key: "Company", label: "Firma", kind: "text", part: "app", ns: NS.ep, prefix: "", tag: "Company" },
+    { key: "Manager", label: "Vorgesetzter", kind: "text", part: "app", ns: NS.ep, prefix: "", tag: "Manager" },
+    { key: "Application", label: "Erstellt mit", hint: 'z. B. "Microsoft Office Word"', kind: "text", part: "app", ns: NS.ep, prefix: "", tag: "Application" },
+    { key: "AppVersion", label: "Programmversion", hint: "Format: 16.0000", kind: "text", part: "app", ns: NS.ep, prefix: "", tag: "AppVersion" },
+    { key: "Template", label: "Vorlage", kind: "text", part: "app", ns: NS.ep, prefix: "", tag: "Template" },
+    { key: "TotalTime", label: "Bearbeitungszeit (Min.)", kind: "number", part: "app", ns: NS.ep, prefix: "", tag: "TotalTime" },
+    { key: "HyperlinkBase", label: "Hyperlink-Basis", hint: "Enth\xE4lt oft lokale Pfade", kind: "text", part: "app", ns: NS.ep, prefix: "", tag: "HyperlinkBase" }
+  ];
+  var DEFAULT_CLEANUP = {
+    stripRsids: true,
+    stripCustomProps: false,
+    stripThumbnail: true,
+    stripComments: false,
+    normalizeZipTimestamps: true
+  };
+  var SUPPORTED_EXTENSIONS = [
+    ".docx",
+    ".docm",
+    ".dotx",
+    ".dotm",
+    ".xlsx",
+    ".xlsm",
+    ".xltx",
+    ".xltm",
+    ".pptx",
+    ".pptm",
+    ".potx",
+    ".ppsx",
+    ".ppsm"
+  ];
+  var decoder = new TextDecoder();
+  var encoder = new TextEncoder();
+  function findEntry(entries, name) {
+    return entries.find((e) => e.name === name);
+  }
+  function textOf(entries, name) {
+    const entry = findEntry(entries, name);
+    return entry ? decoder.decode(entry.data) : void 0;
+  }
+  function setText(entries, name, xml) {
+    const entry = findEntry(entries, name);
+    if (entry) {
+      entry.data = encoder.encode(xml);
+    } else {
+      entries.push({ name, data: encoder.encode(xml), method: 8, dosTime: 0, dosDate: 33, externalAttr: 0 });
+    }
+  }
+  function parseXml(xml, label) {
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    if (doc.getElementsByTagName("parsererror").length > 0) {
+      throw new Error(`XML konnte nicht gelesen werden: ${label}`);
+    }
+    return doc;
+  }
+  function serializeXml(doc) {
+    const xml = new XMLSerializer().serializeToString(doc);
+    if (xml.startsWith("<?xml")) return xml;
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' + xml;
+  }
+  function firstByTag(doc, ns, tag) {
+    const list = doc.getElementsByTagNameNS(ns, tag);
+    return list.length > 0 ? list[0] : null;
+  }
+  function toW3CDTF(date) {
+    return date.toISOString().replace(/\.\d{3}Z$/, "Z");
+  }
+  function toLocalInput(iso) {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return "";
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+  var CORE_TEMPLATE = `<cp:coreProperties xmlns:cp="${NS.cp}" xmlns:dc="${NS.dc}" xmlns:dcterms="${NS.dcterms}" xmlns:dcmitype="${NS.dcmitype}" xmlns:xsi="${NS.xsi}"/>`;
+  var APP_TEMPLATE = `<Properties xmlns="${NS.ep}" xmlns:vt="${NS.vt}"/>`;
+  async function loadDocument(file) {
+    const lower = file.name.toLowerCase();
+    if (/\.(doc|xls|ppt)$/.test(lower)) {
+      throw new Error(
+        "Das alte Bin\xE4rformat (.doc/.xls/.ppt) wird nicht unterst\xFCtzt. In Word/Excel als .docx/.xlsx speichern und erneut versuchen."
+      );
+    }
+    const entries = await readZip(await file.arrayBuffer());
+    if (!findEntry(entries, CONTENT_TYPES)) {
+      throw new Error("Kein OOXML-Paket \u2014 die Datei enth\xE4lt keine [Content_Types].xml.");
+    }
+    const values = {};
+    const coreXml = textOf(entries, CORE_PART);
+    const appXml = textOf(entries, APP_PART);
+    const coreDoc = coreXml ? parseXml(coreXml, CORE_PART) : null;
+    const appDoc = appXml ? parseXml(appXml, APP_PART) : null;
+    for (const field of FIELDS) {
+      const doc = field.part === "core" ? coreDoc : appDoc;
+      if (!doc) continue;
+      const el2 = firstByTag(doc, field.ns, field.tag);
+      values[field.key] = el2?.textContent ?? "";
+    }
+    return {
+      fileName: file.name,
+      entries,
+      values,
+      customProps: readCustomProps(entries),
+      traces: scanTraces(entries)
+    };
+  }
+  function readCustomProps(entries) {
+    const xml = textOf(entries, CUSTOM_PART);
+    if (!xml) return [];
+    const doc = parseXml(xml, CUSTOM_PART);
+    const props = [];
+    const nodes = doc.getElementsByTagNameNS(NS.custom, "property");
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      const valueEl = Array.from(node.children).find((c) => c.namespaceURI === NS.vt);
+      props.push({
+        name: node.getAttribute("name") ?? `Eigenschaft ${i + 1}`,
+        value: valueEl?.textContent ?? "",
+        type: valueEl?.localName ?? "lpwstr"
+      });
+    }
+    return props;
+  }
+  function scanTraces(entries) {
+    const traces = [];
+    const names = entries.map((e) => e.name);
+    const settings = textOf(entries, "word/settings.xml") ?? "";
+    const documentXml = textOf(entries, "word/document.xml") ?? "";
+    const rsidCount = (settings.match(/<w:rsid\b/g) ?? []).length;
+    if (rsidCount > 0 || /\sw:rsid[A-Za-z]*="/.test(documentXml)) {
+      traces.push({
+        id: "rsids",
+        label: `${rsidCount} RSIDs (Revision Save IDs)`,
+        detail: "Word vergibt pro Bearbeitungssitzung eine ID. Damit lassen sich Dokumente derselben Herkunft einander zuordnen und Bearbeitungsrunden z\xE4hlen.",
+        removable: true
+      });
+    }
+    if (/<w:(ins|del|moveFrom|moveTo)\b/.test(documentXml)) {
+      traces.push({
+        id: "trackedChanges",
+        label: "Nachverfolgte \xC4nderungen im Text",
+        detail: 'Enth\xE4lt Autornamen und Zeitstempel direkt im Inhalt. Muss in Word \xFCber \u201E\xDCberpr\xFCfen \u2192 Alle \xC4nderungen annehmen" bereinigt werden \u2014 das ist Inhalt, keine Metadaten.',
+        removable: false
+      });
+    }
+    const commentParts = names.filter((n) => /^word\/comments.*\.xml$/.test(n) || n === "word/people.xml");
+    if (commentParts.length > 0) {
+      traces.push({
+        id: "comments",
+        label: "Kommentare / Personenliste",
+        detail: `Enthaltene Teile: ${commentParts.join(", ")}. Speichern Autornamen und Initialen.`,
+        removable: true
+      });
+    }
+    if (findEntry(entries, CUSTOM_PART)) {
+      traces.push({
+        id: "customProps",
+        label: "Benutzerdefinierte Eigenschaften",
+        detail: "Werden oft von DMS-, Kanzlei- oder Vorlagensystemen gesetzt und enthalten Aktenzeichen oder Benutzer-IDs.",
+        removable: true
+      });
+    }
+    if (names.some((n) => n.startsWith("docProps/thumbnail"))) {
+      traces.push({
+        id: "thumbnail",
+        label: "Vorschaubild",
+        detail: "Zeigt die erste Seite im urspr\xFCnglichen Zustand \u2014 \xFCberlebt sp\xE4tere Text\xE4nderungen.",
+        removable: true
+      });
+    }
+    if (names.some((n) => n.startsWith("_xmlsignatures/"))) {
+      traces.push({
+        id: "signature",
+        label: "Digitale Signatur",
+        detail: "Jede \xC4nderung an der Datei macht die Signatur ung\xFCltig \u2014 das ist unmittelbar sichtbar.",
+        removable: false
+      });
+    }
+    const dosDates = entries.map((e) => e.dosDate);
+    if (new Set(dosDates).size > 1) {
+      traces.push({
+        id: "zipTimestamps",
+        label: "Unterschiedliche ZIP-Zeitstempel",
+        detail: "Jeder Teil im Paket tr\xE4gt ein eigenes Datum. Passen die nicht zu den Dokumenteigenschaften, ist das ein deutliches Indiz f\xFCr nachtr\xE4gliche Bearbeitung.",
+        removable: true
+      });
+    }
+    return traces;
+  }
+  function ensureCoreElement(doc, field) {
+    const existing = firstByTag(doc, field.ns, field.tag);
+    if (existing) return existing;
+    const qualified = field.prefix ? `${field.prefix}:${field.tag}` : field.tag;
+    const el2 = doc.createElementNS(field.ns, qualified);
+    if (field.w3cdtf) el2.setAttributeNS(NS.xsi, "xsi:type", "dcterms:W3CDTF");
+    doc.documentElement.appendChild(el2);
+    return el2;
+  }
+  function applyFields(entries, values, part) {
+    const partName = part === "core" ? CORE_PART : APP_PART;
+    const fields = FIELDS.filter((f) => f.part === part);
+    const wanted = fields.filter((f) => (values[f.key] ?? "").trim() !== "");
+    const existing = textOf(entries, partName);
+    if (!existing && wanted.length === 0) return;
+    const doc = parseXml(existing ?? (part === "core" ? CORE_TEMPLATE : APP_TEMPLATE), partName);
+    for (const field of fields) {
+      const value = (values[field.key] ?? "").trim();
+      const el2 = firstByTag(doc, field.ns, field.tag);
+      if (value === "") {
+        el2?.parentNode?.removeChild(el2);
+        continue;
+      }
+      ensureCoreElement(doc, field).textContent = value;
+    }
+    setText(entries, partName, serializeXml(doc));
+    ensureContentType(entries, partName);
+    ensureRootRelationship(entries, partName);
+  }
+  function ensureContentType(entries, partName) {
+    const types = {
+      [CORE_PART]: "application/vnd.openxmlformats-package.core-properties+xml",
+      [APP_PART]: "application/vnd.openxmlformats-officedocument.extended-properties+xml"
+    };
+    const contentType = types[partName];
+    if (!contentType) return;
+    const xml = textOf(entries, CONTENT_TYPES);
+    if (!xml) return;
+    const doc = parseXml(xml, CONTENT_TYPES);
+    const overrides = doc.getElementsByTagNameNS(NS.ct, "Override");
+    for (let i = 0; i < overrides.length; i++) {
+      if (overrides[i].getAttribute("PartName") === `/${partName}`) return;
+    }
+    const override = doc.createElementNS(NS.ct, "Override");
+    override.setAttribute("PartName", `/${partName}`);
+    override.setAttribute("ContentType", contentType);
+    doc.documentElement.appendChild(override);
+    setText(entries, CONTENT_TYPES, serializeXml(doc));
+  }
+  function ensureRootRelationship(entries, partName) {
+    const relTypes = {
+      [CORE_PART]: "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
+      [APP_PART]: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties"
+    };
+    const type = relTypes[partName];
+    if (!type) return;
+    const xml = textOf(entries, "_rels/.rels");
+    if (!xml) return;
+    const doc = parseXml(xml, "_rels/.rels");
+    const rels = doc.getElementsByTagNameNS(NS.rel, "Relationship");
+    const used = /* @__PURE__ */ new Set();
+    for (let i = 0; i < rels.length; i++) {
+      const rel2 = rels[i];
+      if (rel2.getAttribute("Type") === type) return;
+      used.add(rel2.getAttribute("Id") ?? "");
+    }
+    let n = 1;
+    while (used.has(`rId${n}`)) n++;
+    const rel = doc.createElementNS(NS.rel, "Relationship");
+    rel.setAttribute("Id", `rId${n}`);
+    rel.setAttribute("Type", type);
+    rel.setAttribute("Target", partName);
+    doc.documentElement.appendChild(rel);
+    setText(entries, "_rels/.rels", serializeXml(doc));
+  }
+  function resolveTarget(relsPath, target) {
+    if (target.startsWith("/")) return target.slice(1);
+    const base = relsPath.replace(/_rels\/[^/]+$/, "");
+    const segments = (base + target).split("/");
+    const out = [];
+    for (const segment of segments) {
+      if (segment === "." || segment === "") continue;
+      if (segment === "..") out.pop();
+      else out.push(segment);
+    }
+    return out.join("/");
+  }
+  function removeParts(entries, predicate) {
+    const removed = entries.filter((e) => predicate(e.name)).map((e) => e.name);
+    if (removed.length === 0) return [];
+    for (const name of removed) {
+      const index = entries.findIndex((e) => e.name === name);
+      if (index >= 0) entries.splice(index, 1);
+    }
+    const typesXml = textOf(entries, CONTENT_TYPES);
+    if (typesXml) {
+      const doc = parseXml(typesXml, CONTENT_TYPES);
+      const overrides = Array.from(doc.getElementsByTagNameNS(NS.ct, "Override"));
+      for (const override of overrides) {
+        const partName = (override.getAttribute("PartName") ?? "").replace(/^\//, "");
+        if (removed.includes(partName)) override.parentNode?.removeChild(override);
+      }
+      setText(entries, CONTENT_TYPES, serializeXml(doc));
+    }
+    for (const entry of entries.filter((e) => e.name.endsWith(".rels"))) {
+      const doc = parseXml(decoder.decode(entry.data), entry.name);
+      const rels = Array.from(doc.getElementsByTagNameNS(NS.rel, "Relationship"));
+      let changed = false;
+      for (const rel of rels) {
+        if (rel.getAttribute("TargetMode") === "External") continue;
+        const resolved = resolveTarget(entry.name, rel.getAttribute("Target") ?? "");
+        if (removed.includes(resolved)) {
+          rel.parentNode?.removeChild(rel);
+          changed = true;
+        }
+      }
+      if (changed) entry.data = encoder.encode(serializeXml(doc));
+    }
+    return removed;
+  }
+  function stripRsidsFromPackage(entries) {
+    for (const entry of entries) {
+      if (!/^word\/.*\.xml$/.test(entry.name)) continue;
+      const xml = decoder.decode(entry.data);
+      const cleaned = xml.replace(/<w:rsids>[\s\S]*?<\/w:rsids>/g, "").replace(/<w:rsid\b[^>]*\/>/g, "").replace(/\s+w:rsid[A-Za-z]*="[^"]*"/g, "").replace(/<w:proofState\b[^>]*\/>/g, "");
+      if (cleaned !== xml) entry.data = encoder.encode(cleaned);
+    }
+  }
+  function stripCommentsFromPackage(entries) {
+    removeParts(entries, (name) => /^word\/comments.*\.xml$/.test(name) || name === "word/people.xml");
+    const documentEntry = findEntry(entries, "word/document.xml");
+    if (!documentEntry) return;
+    const xml = decoder.decode(documentEntry.data);
+    const cleaned = xml.replace(/<w:commentRange(?:Start|End)\b[^>]*\/>/g, "").replace(/<w:commentReference\b[^>]*\/>/g, "").replace(/<w:r>(?:\s*<w:rPr>[\s\S]*?<\/w:rPr>)?\s*<\/w:r>/g, "");
+    if (cleaned !== xml) documentEntry.data = encoder.encode(cleaned);
+  }
+  async function buildDocument(doc, values, customProps, options) {
+    const entries = doc.entries.map((e) => ({ ...e, data: new Uint8Array(e.data) }));
+    const removedParts = [];
+    applyFields(entries, values, "core");
+    applyFields(entries, values, "app");
+    if (options.stripCustomProps) {
+      removedParts.push(...removeParts(entries, (name) => name === CUSTOM_PART));
+    } else {
+      applyCustomProps(entries, customProps);
+    }
+    if (options.stripThumbnail) {
+      removedParts.push(...removeParts(entries, (name) => name.startsWith("docProps/thumbnail")));
+    }
+    if (options.stripComments) {
+      stripCommentsFromPackage(entries);
+      removedParts.push("word/comments*.xml", "word/people.xml");
+    }
+    if (options.stripRsids) stripRsidsFromPackage(entries);
+    let timestamp;
+    if (options.normalizeZipTimestamps) {
+      const modified = new Date(values.modified || values.created || Date.now());
+      timestamp = Number.isNaN(modified.getTime()) ? /* @__PURE__ */ new Date() : modified;
+    }
+    return { blob: await writeZip(entries, timestamp), removedParts };
+  }
+  function applyCustomProps(entries, edited) {
+    const xml = textOf(entries, CUSTOM_PART);
+    if (!xml) return;
+    const keptNames = new Set(edited.map((p) => p.name));
+    const byName = new Map(edited.map((p) => [p.name, p]));
+    const doc = parseXml(xml, CUSTOM_PART);
+    const nodes = Array.from(doc.getElementsByTagNameNS(NS.custom, "property"));
+    for (const node of nodes) {
+      const name = node.getAttribute("name") ?? "";
+      if (!keptNames.has(name)) {
+        node.parentNode?.removeChild(node);
+        continue;
+      }
+      const valueEl = Array.from(node.children).find((c) => c.namespaceURI === NS.vt);
+      if (valueEl) valueEl.textContent = byName.get(name)?.value ?? "";
+    }
+    if (doc.getElementsByTagNameNS(NS.custom, "property").length === 0) {
+      removeParts(entries, (name) => name === CUSTOM_PART);
+      return;
+    }
+    const remaining = Array.from(doc.getElementsByTagNameNS(NS.custom, "property"));
+    remaining.forEach((node, index) => node.setAttribute("pid", String(index + 2)));
+    setText(entries, CUSTOM_PART, serializeXml(doc));
+  }
+
+  // standalone/app.js
+  var CLEANUP_LABELS = [
+    {
+      key: "normalizeZipTimestamps",
+      label: "ZIP-Zeitstempel angleichen",
+      hint: 'Setzt das Datum aller Paketteile auf \u201EGe\xE4ndert am". Ohne das verraten die internen Zeitstempel die echte Bearbeitung.'
+    },
+    {
+      key: "stripRsids",
+      label: "Word-RSIDs entfernen",
+      hint: "L\xF6scht die Sitzungs-IDs, mit denen sich Bearbeitungsrunden und verwandte Dokumente zuordnen lassen."
+    },
+    {
+      key: "stripThumbnail",
+      label: "Vorschaubild entfernen",
+      hint: "Das eingebettete Vorschaubild zeigt oft einen \xE4lteren Stand der ersten Seite."
+    },
+    {
+      key: "stripCustomProps",
+      label: "Benutzerdefinierte Eigenschaften l\xF6schen",
+      hint: "Entfernt die komplette custom.xml statt sie einzeln zu bearbeiten."
+    },
+    {
+      key: "stripComments",
+      label: "Kommentare & Personenliste entfernen (Word)",
+      hint: "L\xF6scht comments.xml/people.xml samt Verweisen. Nachverfolgte \xC4nderungen bleiben \u2014 die m\xFCssen in Word angenommen werden."
+    }
+  ];
+  var state = {
+    doc: null,
+    values: {},
+    customProps: [],
+    cleanup: { ...DEFAULT_CLEANUP }
+  };
+  var $ = (id) => document.getElementById(id);
+  function el(tag, props = {}, children = []) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(props)) {
+      if (key === "class") node.className = value;
+      else if (key === "text") node.textContent = value;
+      else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+      else node.setAttribute(key, value);
+    }
+    for (const child of children) node.appendChild(child);
+    return node;
+  }
+  function setMessage(kind, text) {
+    const box = $("message");
+    box.className = text ? `message ${kind}` : "hidden";
+    box.textContent = text ?? "";
+  }
+  async function openFile(file) {
+    setMessage("info", "Datei wird gelesen\u2026");
+    try {
+      const doc = await loadDocument(file);
+      state.doc = doc;
+      state.values = { ...doc.values };
+      state.customProps = doc.customProps.map((p) => ({ ...p }));
+      state.cleanup = { ...DEFAULT_CLEANUP };
+      $("dropzone-name").textContent = doc.fileName;
+      render();
+      setMessage(null, null);
+    } catch (err) {
+      state.doc = null;
+      $("editor").classList.add("hidden");
+      setMessage("error", err instanceof Error ? err.message : "Die Datei konnte nicht gelesen werden.");
+    }
+  }
+  function wireDropzone() {
+    const zone = $("dropzone");
+    const input = $("file-input");
+    input.setAttribute("accept", SUPPORTED_EXTENSIONS.join(","));
+    $("dropzone-formats").textContent = SUPPORTED_EXTENSIONS.join("  ");
+    zone.addEventListener("click", () => input.click());
+    zone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      zone.classList.add("dragging");
+    });
+    zone.addEventListener("dragleave", () => zone.classList.remove("dragging"));
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      zone.classList.remove("dragging");
+      const file = e.dataTransfer.files?.[0];
+      if (file) void openFile(file);
+    });
+    input.addEventListener("change", (e) => {
+      const file = e.target.files?.[0];
+      if (file) void openFile(file);
+      e.target.value = "";
+    });
+    document.addEventListener("dragover", (e) => e.preventDefault());
+    document.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const file = e.dataTransfer?.files?.[0];
+      if (file) void openFile(file);
+    });
+  }
+  function fieldRow(field) {
+    const value = state.values[field.key] ?? "";
+    let input;
+    if (field.kind === "longtext") {
+      input = el("textarea", { rows: "3" });
+      input.value = value;
+      input.addEventListener("input", () => state.values[field.key] = input.value);
+    } else if (field.kind === "datetime") {
+      input = el("input", { type: "datetime-local" });
+      input.value = toLocalInput(value);
+      input.addEventListener("input", () => {
+        state.values[field.key] = input.value ? toW3CDTF(new Date(input.value)) : "";
+      });
+    } else {
+      input = el("input", { type: field.kind === "number" ? "number" : "text" });
+      input.value = value;
+      input.addEventListener("input", () => state.values[field.key] = input.value);
+    }
+    input.id = `field-${field.key}`;
+    const children = [el("label", { text: field.label, for: input.id }), input];
+    if (field.hint) children.push(el("p", { class: "hint", text: field.hint }));
+    return el("div", { class: field.kind === "longtext" ? "field wide" : "field" }, children);
+  }
+  function renderFields(containerId, part) {
+    const container = $(containerId);
+    container.replaceChildren(...FIELDS.filter((f) => f.part === part).map(fieldRow));
+  }
+  function renderCustomProps() {
+    const section = $("custom-section");
+    const container = $("custom-props");
+    if (state.customProps.length === 0) {
+      section.classList.add("hidden");
+      return;
+    }
+    section.classList.remove("hidden");
+    container.replaceChildren(
+      ...state.customProps.map((prop, index) => {
+        const input = el("input", { type: "text" });
+        input.value = prop.value;
+        input.addEventListener("input", () => state.customProps[index].value = input.value);
+        return el("div", { class: "custom-row" }, [
+          el("div", { class: "field" }, [el("label", { text: `${prop.name} (${prop.type})` }), input]),
+          el("button", {
+            class: "ghost danger",
+            text: "L\xF6schen",
+            onclick: () => {
+              state.customProps.splice(index, 1);
+              renderCustomProps();
+            }
+          })
+        ]);
+      })
+    );
+  }
+  function renderCleanup() {
+    const container = $("cleanup");
+    container.replaceChildren(
+      ...CLEANUP_LABELS.map(({ key, label, hint }) => {
+        const box = el("input", { type: "checkbox", id: `cleanup-${key}` });
+        box.checked = state.cleanup[key];
+        box.addEventListener("change", () => state.cleanup[key] = box.checked);
+        return el("label", { class: "check" }, [
+          box,
+          el("span", {}, [el("span", { class: "check-label", text: label }), el("span", { class: "hint", text: hint })])
+        ]);
+      })
+    );
+  }
+  function renderTraces() {
+    const container = $("traces");
+    if (!state.doc || state.doc.traces.length === 0) {
+      container.replaceChildren(el("p", { class: "hint", text: "Keine der bekannten Zusatzspuren gefunden." }));
+      return;
+    }
+    container.replaceChildren(
+      ...state.doc.traces.map((trace) => {
+        const heading = el("p", { class: "trace-label", text: trace.label });
+        if (!trace.removable) heading.appendChild(el("span", { class: "badge", text: "nicht automatisch entfernbar" }));
+        return el("li", {}, [heading, el("p", { class: "hint", text: trace.detail })]);
+      })
+    );
+  }
+  function render() {
+    $("editor").classList.remove("hidden");
+    renderFields("core-fields", "core");
+    renderFields("app-fields", "app");
+    renderCustomProps();
+    renderCleanup();
+    renderTraces();
+  }
+  function wireActions() {
+    $("clear-all").addEventListener("click", () => {
+      for (const field of FIELDS) state.values[field.key] = "";
+      state.customProps = [];
+      render();
+      setMessage("info", "Alle Felder geleert. Leere Felder werden beim Speichern komplett aus der Datei entfernt.");
+    });
+    $("same-author").addEventListener("click", () => {
+      const author = (state.values.creator ?? "").trim();
+      if (!author) {
+        setMessage("info", "Trage zuerst einen Autor ein.");
+        return;
+      }
+      state.values.lastModifiedBy = author;
+      render();
+    });
+    $("reset-counters").addEventListener("click", () => {
+      state.values.revision = "1";
+      state.values.TotalTime = "0";
+      state.values.lastPrinted = "";
+      render();
+      setMessage("info", "Revisionsnummer auf 1, Bearbeitungszeit auf 0, Druckdatum entfernt.");
+    });
+    $("now").addEventListener("click", () => {
+      const now = toW3CDTF(/* @__PURE__ */ new Date());
+      state.values.created = now;
+      state.values.modified = now;
+      render();
+    });
+    $("revert").addEventListener("click", () => {
+      if (!state.doc) return;
+      state.values = { ...state.doc.values };
+      state.customProps = state.doc.customProps.map((p) => ({ ...p }));
+      render();
+      setMessage("info", "Urspr\xFCngliche Werte wiederhergestellt.");
+    });
+    $("save").addEventListener("click", async () => {
+      if (!state.doc) return;
+      const button = $("save");
+      button.disabled = true;
+      try {
+        const { blob } = await buildDocument(state.doc, state.values, state.customProps, state.cleanup);
+        const url = URL.createObjectURL(blob);
+        const link = el("a", { href: url, download: state.doc.fileName });
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1e4);
+        setMessage(
+          "info",
+          'Datei im Download-Ordner gespeichert. \xD6ffne sie einmal zur Kontrolle \u2014 und denk daran, dass der Zeitstempel deines Dateisystems jetzt \u201Eheute" ist.'
+        );
+      } catch (err) {
+        setMessage("error", err instanceof Error ? err.message : "Die Datei konnte nicht geschrieben werden.");
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
+  if (typeof CompressionStream === "undefined") {
+    setMessage("error", "Dieser Browser ist zu alt (CompressionStream fehlt). Nimm Safari 16.4+, Chrome oder Firefox 113+.");
+  } else {
+    wireDropzone();
+    wireActions();
+  }
+})();
+    </script>
+  </body>
+</html>
