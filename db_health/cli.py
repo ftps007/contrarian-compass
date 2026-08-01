@@ -133,7 +133,8 @@ examples:
     g.add_argument("--verbose", "-v", action="store_true",
                    help="show full detail for every check, not just problems")
     g.add_argument("--quiet", "-q", action="store_true",
-                   help="suppress the report; exit code only")
+                   help="suppress the report on stdout; exit code only. "
+                        "--output is still written.")
     g.add_argument("--color", choices=("auto", "always", "never"), default="auto")
     g.add_argument("--no-progress", action="store_true",
                    help="do not print check-in-progress lines to stderr")
@@ -350,7 +351,11 @@ def main(argv: list[str] | None = None) -> int:
     else:
         conn.close()
 
-    if not args.quiet:
+    # --quiet suppresses the report on stdout. It must NOT suppress a file the
+    # caller explicitly asked for: `--quiet --output f` previously wrote
+    # nothing at all and said nothing about it, which is exactly the silent
+    # no-op this whole checker exists to catch.
+    if args.output or not args.quiet:
         stream = open(args.output, "w") if args.output else sys.stdout
         try:
             if args.format == "json":
