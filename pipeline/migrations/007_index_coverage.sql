@@ -79,8 +79,48 @@ ON CONFLICT (symbol) DO NOTHING;
 -- which requires a unique constraint on exactly those columns. It exists on
 -- the live DB but is not declared in any migration, so a rebuilt-from-scratch
 -- database would raise on the first membership refresh. Declare it here.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_index_members_stock_index_added
-    ON stock_index_members (stock_id, index_id, added_date);
+-- IF NOT EXISTS only checks the NAME. The live database already enforces this
+-- key under an auto-generated constraint name
+-- (stock_index_members_stock_id_index_id_added_date_key), so creating it here
+-- by a different name produced a second, identical unique index — visible as
+-- schema.redundant_indexes going from 5 to 6. Check for the columns, not the
+-- name.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_index i
+          JOIN pg_class c ON c.oid = i.indrelid
+         WHERE c.relname = 'stock_index_members'
+           AND i.indisunique
+           AND i.indnatts = 3
+           -- attname is `name`, not `text`; without the cast the comparison
+           -- raises "operator does not exist: name[] = text[]", and because
+           -- this whole file is one transaction that error takes every
+           -- statement after it down with it.
+           AND (SELECT array_agg(a.attname::text ORDER BY a.attname::text)
+                  FROM unnest(i.indkey) k
+                  JOIN pg_attribute a
+                    ON a.attrelid = i.indrelid AND a.attnum = k)
+               = ARRAY['added_date', 'index_id', 'stock_id']
+    ) THEN
+        CREATE UNIQUE INDEX uq_index_members_stock_index_added
+            ON stock_index_members (stock_id, index_id, added_date);
+    END IF;
+END $$;
+
+-- Undo the duplicate if an earlier run of this migration created it.
+DROP INDEX IF EXISTS uq_index_members_stock_index_added_dup;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'uq_index_members_stock_index_added')
+       AND EXISTS (SELECT 1 FROM pg_class
+                    WHERE relname = 'stock_index_members_stock_id_index_id_added_date_key')
+    THEN
+        DROP INDEX uq_index_members_stock_index_added;
+        RAISE NOTICE 'dropped duplicate uq_index_members_stock_index_added';
+    END IF;
+END $$;
 
 -- ── 2b. One ACTIVE membership per (stock, index) ──────────────────────────
 --
