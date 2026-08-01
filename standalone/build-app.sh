@@ -84,10 +84,20 @@ done <<'BROWSERS'
 /Applications/Chromium.app/Contents/MacOS/Chromium
 BROWSERS
 
-open "$PAGE"
+# No Chrome-family browser: hand the page to the default browser. If even that
+# fails, say so on screen instead of quitting without a trace.
+if ! open "$PAGE"; then
+  osascript -e "display alert \"Metadaten-Editor\" message \"Die Seite konnte nicht geöffnet werden: $PAGE\"" >/dev/null 2>&1
+  exit 1
+fi
 LAUNCHER
 
 chmod +x "$APP/Contents/MacOS/metadaten-editor"
+
+# Downloads can carry a quarantine flag, and unsigned bundles are refused on
+# Apple silicon — an ad-hoc signature is enough for a locally built app.
+xattr -cr "$APP" 2>/dev/null || true
+codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
 
 # Nudge Launch Services so the app turns up in Launchpad and Spotlight at once.
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
