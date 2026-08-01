@@ -171,6 +171,18 @@ class Thresholds:
 
     # Panel completeness for simulations.
     min_history_rows: int = 252                  # 1y — screener beta needs this
+    # A run of missing sessions this long is a defect regardless of how good
+    # the overall ratio looks: a contiguous hole distorts momentum and drawdown
+    # factors far more than the same count scattered across the series.
+    max_acceptable_gap_sessions: int = 5
+    # The NYSE calendar rules encoded here (see nyse_calendar.py) describe the
+    # modern schedule. Before 1952 the exchange also traded Saturdays, so
+    # expected-session counts for older series are unreliable and completeness
+    # is reported as approximate rather than as a defect.
+    calendar_reliable_from: date = date(1970, 1, 1)
+    # Database-wide grade mix tolerated before the census escalates.
+    inventory_bad_pct_warn: float = 0.05
+    inventory_bad_pct_fail: float = 0.15
     sim_lookback_days: int = 750                 # matches the screener's cutoff
     panel_completeness_warn: float = 0.98        # observed/expected trading days
     panel_completeness_fail: float = 0.90
@@ -233,6 +245,8 @@ class Thresholds:
             current = getattr(self, k)
             if isinstance(current, bool):
                 setattr(self, k, bool(v))
+            elif isinstance(current, date):
+                setattr(self, k, v if isinstance(v, date) else date.fromisoformat(str(v)))
             elif isinstance(current, int) and not isinstance(current, bool):
                 setattr(self, k, int(v))
             elif isinstance(current, float):
@@ -273,15 +287,33 @@ class Context:
                  universe: str = "all_us",
                  sample_limit: int = 10,
                  profile: str = "standard",
+                 scope: str = "universe",
                  today: date | None = None):
         self.conn = conn
         self.t = thresholds
+        # window_days <= 0 means "no lower bound" — scan every row ever loaded.
         self.window_days = window_days
         self.universe = universe
         self.sample_limit = sample_limit
         self.profile = profile
+        # "universe" = active members of `universe`; "all" = every tradable
+        # ticker in `stocks`, which is what a full-database audit needs.
+        self.scope = scope
         self.today = today or date.today()
         self._cache: dict[str, Any] = {}
+
+    @property
+    def unbounded(self) -> bool:
+        return self.window_days <= 0
+
+    @property
+    def scope_label(self) -> str:
+        return "database-wide" if self.scope == "all" else f"{self.universe} universe"
+
+    @property
+    def member_label(self) -> str:
+        """Noun for one element of the target set, for report prose."""
+        return "ticker" if self.scope == "all" else f"{self.universe} member"
 
     # ---- query helpers -------------------------------------------------
 
@@ -390,7 +422,32 @@ class Context:
 
     @property
     def window_start(self) -> date:
+        # A sentinel far below any real bar (the panel starts in 1927) rather
+        # than date.min, so it still fits a DATE column comparison cleanly.
+        if self.unbounded:
+            return date(1900, 1, 1)
         return self.today - timedelta(days=self.window_days)
+
+    @property
+    def window_label(self) -> str:
+        return "all history" if self.unbounded else f"the last {self.window_days}d"
+
+    @property
+    def sim_since(self) -> date:
+        """Start of the panel the coverage checks judge completeness over.
+
+        Normally the screener's own 750-day cutoff. Unbounded mode widens it to
+        every bar ever loaded, so a ticker is graded on its whole series rather
+        than only the stretch a current backtest would read.
+        """
+        if self.unbounded:
+            return date(1900, 1, 1)
+        return self.today - timedelta(days=self.t.sim_lookback_days)
+
+    @property
+    def sim_since_label(self) -> str:
+        return ("each ticker's full history" if self.unbounded
+                else f"the last {self.t.sim_lookback_days}d")
 
     # ---- universe ------------------------------------------------------
 
@@ -435,6 +492,33 @@ class Context:
     @property
     def universe_ids(self) -> list[int]:
         return [sid for sid, _ in self.universe_stocks]
+
+    @property
+    def all_stocks(self) -> list[tuple[int, str]]:
+        """Every tradable ticker in `stocks` — the same filter the updater uses
+        to decide what to fetch, so coverage is judged against exactly the set
+        the pipeline claims to maintain."""
+        def load():
+            cols = self.columns("stocks")
+            where = "ticker IS NOT NULL AND ticker <> ''"
+            if "test_issue" in cols:
+                where += " AND test_issue IS DISTINCT FROM 'Y'"
+            return [(r[0], r[1]) for r in self.query(
+                f"SELECT id, ticker FROM stocks WHERE {where} ORDER BY ticker")]
+        return self.cached("all_stocks", load)
+
+    # ---- target set -----------------------------------------------------
+    # Checks scan `target_*` rather than `universe_*` so a single --scope flag
+    # switches the whole suite between "the universe I simulate" and "every
+    # ticker in the database".
+
+    @property
+    def target_stocks(self) -> list[tuple[int, str]]:
+        return self.all_stocks if self.scope == "all" else self.universe_stocks
+
+    @property
+    def target_ids(self) -> list[int]:
+        return [sid for sid, _ in self.target_stocks]
 
     @property
     def tradable_stocks_count(self) -> int:

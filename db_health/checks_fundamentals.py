@@ -22,11 +22,11 @@ def check_fundamentals_coverage(ctx: Context):
         return Finding("fund.coverage", "fundamentals",
                        "Fundamentals cover the universe", Status.SKIP,
                        "stock_fundamentals not present")
-    uni = ctx.universe_ids
+    uni = ctx.target_ids
     if not uni:
         return Finding("fund.coverage", "fundamentals",
                        "Fundamentals cover the universe", Status.SKIP,
-                       f"universe {ctx.universe!r} resolved to 0 stocks")
+                       f"{ctx.scope_label} resolved to 0 stocks")
     have = int(ctx.scalar("""
         SELECT COUNT(DISTINCT stock_id) FROM stock_fundamentals
          WHERE stock_id = ANY(%s)
@@ -43,7 +43,7 @@ def check_fundamentals_coverage(ctx: Context):
         "fund.coverage", "fundamentals", "Fundamentals cover the universe",
         escalate_ratio(ratio, ctx.t.fundamentals_coverage_warn,
                        ctx.t.fundamentals_coverage_fail),
-        f"{have:,}/{len(uni):,} ({pct(ratio)}) of the {ctx.universe} universe "
+        f"{have:,}/{len(uni):,} ({pct(ratio)}) of the {ctx.scope_label} "
         f"has at least one fundamentals snapshot",
         metrics={"covered": have, "universe_size": len(uni),
                  "coverage": round(ratio, 4)},
@@ -68,11 +68,11 @@ def check_snapshot_recency(ctx: Context):
         return Finding("fund.snapshot_recency", "fundamentals",
                        "Per-stock snapshots are individually fresh",
                        Status.SKIP, "stock_fundamentals not present")
-    uni = ctx.universe_ids
+    uni = ctx.target_ids
     if not uni:
         return Finding("fund.snapshot_recency", "fundamentals",
                        "Per-stock snapshots are individually fresh",
-                       Status.SKIP, f"universe {ctx.universe!r} resolved to 0 stocks")
+                       Status.SKIP, f"{ctx.scope_label} resolved to 0 stocks")
     # Ignore future-dated snapshots when establishing "newest" — otherwise one
     # bad row pushes the cutoff forward and every healthy stock reads as stale.
     newest = ctx.scalar("SELECT MAX(snapshot_date) FROM stock_fundamentals "

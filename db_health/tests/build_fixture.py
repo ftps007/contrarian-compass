@@ -45,6 +45,11 @@ DEFECTS = {
                 ["valid.calendar_alignment"]),
     "GAPPY":   ("12 consecutive sessions deleted mid-history",
                 ["cover.interior_gaps", "cover.panel_completeness"]),
+    # A second gappy name so the aggregate completeness ratio lands clearly
+    # below the warn bar rather than on top of it — a test that sits exactly
+    # on a threshold passes or fails on rounding, which tests nothing.
+    "GAPPY2":  ("25 consecutive sessions deleted mid-history",
+                ["cover.interior_gaps", "cover.panel_completeness"]),
     "STALE":   ("no bars for the last 30 sessions",
                 ["fresh.stale_tickers", "idx.inactive_but_traded"]),
     "FLAT":    ("20 consecutive identical closes", ["corrupt.flatline"]),
@@ -167,6 +172,9 @@ def build(conn, *, today: date, years: int = 3, seed: int = 42,
         if tkr == "GAPPY":
             cut = len(days) // 2
             days = days[:cut] + days[cut + 12:]        # DEFECT: interior gap
+        if tkr == "GAPPY2":
+            cut = len(days) // 3
+            days = days[:cut] + days[cut + 25:]        # DEFECT: bigger gap
 
         px = walk(tkr, rng.uniform(20, 300), days)
 

@@ -150,7 +150,7 @@ def check_null_close(ctx: Context):
     return Finding(
         "valid.null_close", "validity", "No NULL closes",
         escalate(n, 0, ctx.t.ohlc_violation_fail),
-        f"{n:,} row(s) with a NULL close in the last {ctx.window_days}d",
+        f"{n:,} row(s) with a NULL close in {ctx.window_label}",
         metrics={"count": n}, samples=samples,
         remediation="These occupy a (stock_id, date) slot, so ON CONFLICT DO "
                     "NOTHING will never replace them with the real bar — the "
@@ -291,7 +291,7 @@ def check_split_artifacts(ctx: Context):
     """, (ctx.window_start, ctx.t.split_return_threshold))
     if not rows:
         return None
-    in_uni = {t for _, t in ctx.universe_stocks}
+    in_uni = {t for _, t in ctx.target_stocks}
     affected_universe = sorted({r["ticker"] for r in rows if r["ticker"] in in_uni})
     status = Status.FAIL if affected_universe else Status.WARN
     return Finding(
@@ -299,7 +299,7 @@ def check_split_artifacts(ctx: Context):
         "No unapplied stock-split artifacts", status,
         f"{len(rows)} split-shaped price discontinuity(ies) across "
         f"{len({r['ticker'] for r in rows})} ticker(s); "
-        f"{len(affected_universe)} are active {ctx.universe} members",
+        f"{len(affected_universe)} are active {ctx.member_label}s",
         metrics={"count": len(rows),
                  "tickers": len({r["ticker"] for r in rows}),
                  "universe_tickers": affected_universe[:50]},
@@ -441,7 +441,7 @@ def check_adj_factor_stale(ctx: Context):
     """, (ctx.window_start, tol))
     if not rows:
         return None
-    in_uni = {t for _, t in ctx.universe_stocks}
+    in_uni = {t for _, t in ctx.target_stocks}
     hit_uni = [r for r in rows if r["ticker"] in in_uni]
     return Finding(
         "corrupt.adj_factor_stale", "corruption",
@@ -473,11 +473,11 @@ def check_adj_factor_monotone(ctx: Context):
     Restricted to the target universe: a full-table window scan over 36M rows
     is not something to run daily.
     """
-    uni = ctx.universe_ids
+    uni = ctx.target_ids
     if not uni:
         return Finding("corrupt.adj_factor_monotone", "corruption",
                        "Adjustment factors increase monotonically", Status.SKIP,
-                       f"universe {ctx.universe!r} resolved to 0 stocks")
+                       f"{ctx.scope_label} resolved to 0 stocks")
     tol = ctx.t.adj_factor_monotone_tolerance
     rows = ctx.query_dicts("""
         WITH f AS (
@@ -526,10 +526,10 @@ def check_flatline(ctx: Context):
     the ordering so runs of the same close collapse to a constant group key.
     """
     min_days = ctx.t.flatline_min_days
-    uni = ctx.universe_ids
+    uni = ctx.target_ids
     if not uni:
         return Finding("corrupt.flatline", "corruption", "No frozen price series",
-                       Status.SKIP, f"universe {ctx.universe!r} resolved to 0 stocks")
+                       Status.SKIP, f"{ctx.scope_label} resolved to 0 stocks")
     rows = ctx.query_dicts("""
         WITH p AS (
             SELECT stock_id, date, close,
@@ -569,11 +569,11 @@ def check_flatline(ctx: Context):
 @check("corrupt.zero_volume", "corruption", "No prolonged zero-volume streaks",
        min_profile="deep", heavy=True)
 def check_zero_volume(ctx: Context):
-    uni = ctx.universe_ids
+    uni = ctx.target_ids
     if not uni:
         return Finding("corrupt.zero_volume", "corruption",
                        "No prolonged zero-volume streaks", Status.SKIP,
-                       f"universe {ctx.universe!r} resolved to 0 stocks")
+                       f"{ctx.scope_label} resolved to 0 stocks")
     rows = ctx.query_dicts("""
         WITH p AS (
             SELECT stock_id, date, COALESCE(volume, 0) AS volume,
@@ -599,7 +599,7 @@ def check_zero_volume(ctx: Context):
         "corrupt.zero_volume", "corruption", "No prolonged zero-volume streaks",
         Status.WARN,
         f"{len(rows)} zero-volume streak(s) of >={ctx.t.zero_volume_streak_days} "
-        f"days among active {ctx.universe} members",
+        f"days among active {ctx.member_label}s",
         metrics={"count": len(rows),
                  "tickers": len({r["ticker"] for r in rows})},
         samples=rows[:ctx.sample_limit],

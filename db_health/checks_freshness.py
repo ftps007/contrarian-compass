@@ -85,11 +85,11 @@ def check_latest_day_coverage(ctx: Context):
         return Finding("fresh.latest_day_coverage", "freshness",
                        "Latest trading day covers the universe",
                        Status.SKIP, "no trading calendar available")
-    uni = ctx.universe_ids
+    uni = ctx.target_ids
     if not uni:
         return Finding("fresh.latest_day_coverage", "freshness",
                        "Latest trading day covers the universe", Status.SKIP,
-                       f"universe {ctx.universe!r} resolved to 0 stocks")
+                       f"{ctx.scope_label} resolved to 0 stocks")
     have = int(ctx.scalar("""
         SELECT COUNT(DISTINCT stock_id) FROM price_data
          WHERE date = %s AND stock_id = ANY(%s) AND close IS NOT NULL
@@ -112,7 +112,7 @@ def check_latest_day_coverage(ctx: Context):
     return Finding(
         "fresh.latest_day_coverage", "freshness",
         "Latest trading day covers the universe", status,
-        f"{have:,}/{len(uni):,} ({pct(ratio)}) of the {ctx.universe} universe "
+        f"{have:,}/{len(uni):,} ({pct(ratio)}) of the {ctx.scope_label} "
         f"has a close for {cal_last}",
         metrics={"date": cal_last, "covered": have, "universe_size": len(uni),
                  "coverage": round(ratio, 4)},
@@ -160,7 +160,7 @@ def check_stale_tickers(ctx: Context):
 
     # Prioritise stale tickers that are *active index members* — a stale
     # delisted micro-cap is noise; a stale S&P 500 name breaks a rebalance.
-    uni = set(ctx.universe_ids)
+    uni = set(ctx.target_ids)
     in_universe = [r for r in rows if r["id"] in uni]
     if in_universe and status == Status.PASS:
         status = Status.WARN
@@ -169,7 +169,7 @@ def check_stale_tickers(ctx: Context):
     return Finding(
         "fresh.stale_tickers", "freshness", "Few tickers lag the market", status,
         f"{len(rows):,}/{total:,} ({pct(ratio)}) tickers are >{lag} trading days "
-        f"stale; {len(in_universe)} of them are active {ctx.universe} members",
+        f"stale; {len(in_universe)} of them are active {ctx.member_label}s",
         metrics={"stale": len(rows), "total": total, "ratio": round(ratio, 4),
                  "stale_in_universe": len(in_universe), "cutoff": cutoff},
         samples=[{"ticker": r["ticker"], "last_date": r["last_date"],

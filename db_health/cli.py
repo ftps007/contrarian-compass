@@ -19,6 +19,7 @@ except ImportError:                                    # pragma: no cover
 from . import __version__
 from .core import (PROFILES, Context, RunResult, Status, Thresholds, REGISTRY,
                    run_checks)
+from .inventory import build_inventory, summarise, write_csv, write_json
 from .report import TerminalReporter, render_markdown
 
 # Importing the check modules is what populates REGISTRY.
@@ -28,6 +29,7 @@ from . import checks_integrity   # noqa: F401
 from . import checks_coverage    # noqa: F401
 from . import checks_fundamentals  # noqa: F401
 from . import checks_ops         # noqa: F401
+from . import checks_inventory  # noqa: F401
 
 
 DEFAULT_DSN_PARTS = {
@@ -65,6 +67,12 @@ examples:
   # just the checks that protect simulations from silent corruption
   python db_health_check.py --only corruption --only coverage
 
+  # audit EVERY ticker in the DB over its ENTIRE history
+  python db_health_check.py --full-history --profile deep
+
+  # ...and export the per-ticker coverage census for all of them
+  python db_health_check.py --full-history --coverage-report coverage.csv
+
   # gate a pipeline: non-zero exit on anything worse than a warning
   python db_health_check.py --quiet --fail-on fail || echo "do not rebalance"
 """)
@@ -76,8 +84,9 @@ examples:
     g.add_argument("--user", default=DEFAULT_DSN_PARTS["user"])
     g.add_argument("--host", default=DEFAULT_DSN_PARTS["host"])
     g.add_argument("--port", type=int, default=DEFAULT_DSN_PARTS["port"])
-    g.add_argument("--statement-timeout", type=int, default=600,
-                   help="per-query timeout in seconds (default 600; 0 disables)")
+    g.add_argument("--statement-timeout", type=int, default=None,
+                   help="per-query timeout in seconds (default 600, or 3600 "
+                        "with --full-history; 0 disables)")
 
     g = p.add_argument_group("scope")
     g.add_argument("--profile", choices=PROFILES, default="standard",
@@ -87,7 +96,14 @@ examples:
                    help="universe to validate against, as the screener names "
                         "them (all_us, sp900, large_us, sp500, ndx, ...)")
     g.add_argument("--window-days", type=int, default=400,
-                   help="lookback for row-level scans (default 400)")
+                   help="lookback for row-level scans (default 400); "
+                        "0 = no lower bound, scan every row ever loaded")
+    g.add_argument("--scope", choices=("universe", "all"), default="universe",
+                   help="universe = active members of --universe (default); "
+                        "all = every tradable ticker in stocks")
+    g.add_argument("--full-history", action="store_true",
+                   help="audit every ticker over its entire history: "
+                        "shorthand for --scope all --window-days 0")
     g.add_argument("--only", action="append", default=[], metavar="ID|CATEGORY",
                    help="run only these checks/categories (repeatable, "
                         "trailing * allowed)")
@@ -108,6 +124,9 @@ examples:
     g.add_argument("--json", action="store_const", const="json", dest="format",
                    help="shorthand for --format json")
     g.add_argument("--output", "-o", metavar="FILE", help="write report to FILE")
+    g.add_argument("--coverage-report", metavar="FILE",
+                   help="write the per-ticker coverage census for the whole "
+                        "database to FILE (.csv or .json)")
     g.add_argument("--samples", type=int, default=10,
                    help="offending rows to show per check (default 10)")
     g.add_argument("--verbose", "-v", action="store_true",
@@ -263,6 +282,15 @@ def main(argv: list[str] | None = None) -> int:
     conn.set_session(readonly=True, autocommit=False)
     db_label = f"{args.dbname}@{args.host}:{args.port}" if not args.dsn else "dsn"
     try:
+        if args.full_history:
+            args.scope, args.window_days = "all", 0
+
+        if args.statement_timeout is None:
+            # A single window-function pass over 36M unbounded rows takes
+            # minutes; the normal 10-minute guard would abort the audit
+            # partway and report it as a checker ERROR rather than a result.
+            args.statement_timeout = 3600 if args.full_history else 600
+
         if args.statement_timeout:
             with conn.cursor() as cur:
                 cur.execute("SET statement_timeout = %s",
@@ -270,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
 
         ctx = Context(conn, thresholds, window_days=args.window_days,
                       universe=args.universe, sample_limit=args.samples,
-                      profile=args.profile, today=asof)
+                      profile=args.profile, scope=args.scope, today=asof)
 
         def _progress(cid: str) -> None:
             print(f"\r  running {cid:<40}", end="", file=sys.stderr, flush=True)
@@ -283,6 +311,25 @@ def main(argv: list[str] | None = None) -> int:
                             skip=args.skip or None, progress=progress)
         if progress:
             print("\r" + " " * 52 + "\r", end="", file=sys.stderr, flush=True)
+
+        if args.coverage_report:
+            # Reuses the census the inventory checks already built when they
+            # ran; only pays for the scans again if they were filtered out.
+            inv = ctx.cached("inventory:deep=True", lambda: build_inventory(
+                ctx, deep=True,
+                progress=(lambda m: print(f"  census: {m}", file=sys.stderr))
+                if not args.quiet else None))
+            if args.coverage_report.endswith(".json"):
+                write_json(inv, args.coverage_report)
+            else:
+                write_csv(inv, args.coverage_report)
+            if not args.quiet:
+                s = summarise(inv)
+                print(f"\ncoverage report: {len(inv):,} tickers → "
+                      f"{args.coverage_report}", file=sys.stderr)
+                print("  " + "  ".join(f"{g}={n:,}" for g, n
+                                       in s["grades"].items() if n),
+                      file=sys.stderr)
     finally:
         pass
 

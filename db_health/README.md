@@ -7,7 +7,7 @@ contrarian screener and every backtest:
 postgres://localhost:5432/stock_data
 ```
 
-56 checks across eight categories, built around one question: **can I trust a
+59 checks across nine categories, built around one question: **can I trust a
 contrarian simulation run against this database right now?**
 
 > **Where this belongs.** The database, its migrations and `update_stock_data.py`
@@ -78,6 +78,12 @@ python db_health_check.py --profile deep --persist
 # only the checks that protect simulations from silent corruption
 python db_health_check.py --only corruption --only coverage
 
+# audit EVERY ticker in the DB over its ENTIRE history
+python db_health_check.py --full-history --profile deep
+
+# ...and export the per-ticker census so you can inspect all 11k of them
+python db_health_check.py --full-history --coverage-report coverage.csv
+
 # gate a rebalance
 python db_health_check.py --quiet --fail-on fail || echo "do not trade this"
 ```
@@ -96,6 +102,55 @@ write, so a check can never mutate the database it is inspecting.
 | `quick` | catalogue introspection, aggregate freshness, universe resolution | daily, before the screener |
 | `standard` (default) | row-level scans over `--window-days` (default 400) | after each update run |
 | `deep` | whole-history scans, monotonicity, bloat, unused indexes | weekly |
+
+### Scope: the universe vs the whole database
+
+Two independent dials control *how much* gets examined:
+
+| Flag | Effect |
+|---|---|
+| `--scope universe` (default) | grade the active members of `--universe` |
+| `--scope all` | grade **every tradable ticker in `stocks`** (~11k) |
+| `--window-days 400` (default) | row-level scans look back 400 days |
+| `--window-days 0` | **no lower bound** — scan every row ever loaded |
+| `--full-history` | shorthand for `--scope all --window-days 0` |
+
+The default is deliberately narrow: it answers "is the panel I am about to
+simulate on sound?" cheaply enough to run before every screener pass.
+
+`--full-history` answers the bigger question, and it is a genuinely different
+one. Roughly 8,000 of the 11,134 tickers are in no active index today, and the
+750-day window covers a small fraction of a series that reaches back to 1927 —
+so the default leaves most of the 36M rows unexamined. Those rows still matter:
+`sp500_members_at()` deliberately reaches back to constituents that have since
+been *removed*, so any survivorship-free backtest prices exactly the names the
+narrow scope skips.
+
+Every check respects both dials. With `--full-history` the corruption
+detectors (split artifacts, flatlines, bad ticks, zero-volume runs) sweep the
+entire table rather than a trailing window.
+
+### Cost
+
+Measured on a half-scale replica — 19.6M rows, 3,001 tickers, 2.4 GB — on a
+local Postgres 16:
+
+| Invocation | Runtime |
+|---|---|
+| `--profile quick` | **0.1s** — catalogue and aggregates only |
+| `--profile standard` | seconds — scans bounded to 400 days |
+| `--full-history --profile deep` + CSV export | **4m32s** (59 checks) |
+
+The full audit is dominated by the unbounded window-function passes (split
+artifacts, bad ticks, adjustment monotonicity) and scales roughly with row
+count, so expect **~8-10 minutes** against the real 36.1M-row table. That is a
+monthly job, not a daily one — which is why `--full-history` is opt-in and the
+default scope stays narrow.
+
+`--full-history` raises the per-query guard from 600s to 3600s automatically,
+because a single unbounded window pass over 36M rows can exceed ten minutes and
+a timeout would be reported as a checker error rather than a result. Override
+with `--statement-timeout`.
 
 ### Exit codes
 
@@ -143,6 +198,62 @@ Severity is per-check and threshold-driven; `→` marks the escalation to FAIL.
 | `cover.stocks_without_prices` | Index members with no price rows at all — silently dropped from the ranking, not flagged. Usually a symbol mismatch (`BRK.B` vs `BRK-B`). |
 | `cover.universe_resolution` | The `stocks ⋈ stock_index_members ⋈ stock_indices` join every `--source db` run starts from. |
 | `cover.history_depth` | How far back the panel actually reaches, per index. |
+
+### `inventory` — every ticker, entire history
+
+These are the database-wide checks. They build a **per-ticker coverage census**
+(`inventory.py`) from three set-based passes over `price_data` — the cost is
+the same whether the database holds 40 tickers or 11,000 — and grade every
+ticker on its whole series.
+
+| Check | What it catches |
+|---|---|
+| `inv.census` | The full census: span, rows, observed vs expected sessions, gaps, staleness and defect counts for **every** ticker. Escalates on the share graded EMPTY/CORRUPT/GAPPY/THIN. |
+| `inv.full_history_gaps` | Contiguous runs of missing sessions anywhere in any ticker's history — including behind the newest row, where the updater will never look again. |
+| `inv.orphan_tickers` | Coverage of tickers in no active index. Easy to dismiss, but these are exactly the historical constituents `sp500_members_at()` reaches for; where their history is unusable the backtest silently drops them, reintroducing the survivorship bias the history table exists to remove. |
+
+Each ticker gets the worst grade it qualifies for:
+
+| Grade | Meaning |
+|---|---|
+| `EMPTY` | no price rows at all |
+| `CORRUPT` | split artifacts, invalid bars, bad prices, negative volume, NULL closes, or a stale adjustment factor |
+| `GAPPY` | missing sessions inside its own first..last span |
+| `STALE` | no recent bar — often a legitimate delisting, so judge in context |
+| `THIN` | fewer closes than a backtest needs |
+| `APPROX` | clean, but starts before the calendar rules are reliable |
+| `OK` | complete and current |
+
+#### The per-ticker export
+
+```bash
+python db_health_check.py --full-history --coverage-report coverage.csv
+```
+
+One row per ticker, 29 columns — `grade`, `reasons`, `first_date`, `last_date`,
+`closes`, `expected_sessions`, `missing_sessions`, `completeness`,
+`gap_count`, `largest_gap_sessions` and its endpoints, `sessions_stale`, plus a
+breakdown of every defect type and the latest `adj_close/close` factor. Write
+`.json` instead of `.csv` for the same data plus a summary block.
+
+```bash
+# every ticker that is not clean, worst first
+python -c "
+import csv; rows=[r for r in csv.DictReader(open('coverage.csv')) if r['grade']!='OK']
+rows.sort(key=lambda r: float(r['completeness']))
+[print(f\"{r['ticker']:<8} {r['grade']:<8} {r['reasons']}\") for r in rows]"
+```
+
+#### A caveat on very old history
+
+Expected-session counts come from the modern NYSE rules in `nyse_calendar.py`.
+Those are wrong before 1952, when the exchange also traded Saturday mornings.
+A series starting before `calendar_reliable_from` (default `1970-01-01`) is
+therefore graded `APPROX` and its completeness ratio is marked approximate
+rather than reported as a defect — observed can legitimately exceed expected
+there. Freshness, gap and corruption metrics stay exact at any age; only the
+expected-session denominator is affected. Move the boundary with
+`--set calendar_reliable_from=1962-01-01`.
 
 ### `freshness` — is the data as new as it should be
 
@@ -272,12 +383,15 @@ detector, then asserts detection in **both** directions:
 
 ```bash
 createdb stock_data_fixture
-python -m db_health.tests.test_health_check --dbname stock_data_fixture
-python -m db_health.tests.test_health_check --dbname stock_data_fixture --clean
+FX="--dbname stock_data_fixture"
+python -m db_health.tests.test_health_check $FX                    # universe scope
+python -m db_health.tests.test_health_check $FX --full-history     # every ticker
+python -m db_health.tests.test_health_check $FX --clean            # false positives
+python -m db_health.tests.test_health_check $FX --clean --full-history
 ```
 
-- **defective fixture** → all 31 seeded defects detected
-- **clean fixture** → zero findings, score 100.0
+- **defective fixture** → all 33 seeded defects detected, in both scopes
+- **clean fixture** → zero findings, score 100.0, in both scopes
 
 The second direction matters as much as the first. A checker that flags healthy
 data stops being read, and an unread report is worse than no report.
@@ -299,6 +413,8 @@ db_health/
   checks_coverage.py            panel completeness, survivorship, sim gate
   checks_fundamentals.py        factor-input quality + index membership
   checks_ops.py                 Postgres health under the daily load
+  checks_inventory.py           database-wide, full-history checks
+  inventory.py                  per-ticker coverage census + CSV/JSON export
   report.py                     terminal / JSON / markdown renderers
   cli.py                        argument parsing, persistence, exit codes
   repair.py                     delete-then-refetch helper

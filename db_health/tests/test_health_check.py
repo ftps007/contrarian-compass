@@ -48,6 +48,11 @@ EXPECTED_TABLE_LEVEL = {
     "cover.simulation_gate",      # the defective names drag readiness down
     "idx.member_counts",          # fixture has ~40 SP500 members, not ~500
     "cover.sp500_members_at",     # same reason
+    # Database-wide, full-history census: the seeded defects push the share of
+    # non-OK tickers past the tolerated mix, and GAPPY's 12-session hole is a
+    # large gap by the absolute rule.
+    "inv.census",
+    "inv.full_history_gaps",
 }
 
 # Checks that legitimately report a non-PASS status on any fixture and are not
@@ -61,6 +66,7 @@ IGNORE = {
     "schema.tables",             # optional objects may be absent
     "fresh.financials", "fresh.catalysts",
     "cover.survivorship",
+    "inv.orphan_tickers",        # INFO/WARN on fixture size, not a defect
 }
 
 
@@ -79,6 +85,9 @@ def main(argv=None) -> int:
     p.add_argument("--port", type=int, default=5432)
     p.add_argument("--keep", action="store_true",
                    help="do not rebuild the fixture, test what is there")
+    p.add_argument("--full-history", action="store_true",
+                   help="audit every ticker over its entire history "
+                        "(--scope all --window-days 0)")
     p.add_argument("--clean", action="store_true",
                    help="build a defect-free fixture and assert the checker "
                         "reports nothing — the false-positive test")
@@ -97,8 +106,11 @@ def main(argv=None) -> int:
         # bounds, so every data-quality threshold stays at its real value.
         thresholds.index_member_bounds = {"SP500": (1, 10_000)}
 
-    ctx = Context(conn, thresholds, window_days=400, universe="all_us",
-                  sample_limit=5, profile="deep", today=today)
+    ctx = Context(conn, thresholds,
+                  window_days=0 if args.full_history else 400,
+                  universe="all_us", sample_limit=5, profile="deep",
+                  scope="all" if args.full_history else "universe",
+                  today=today)
     result = run_checks(ctx)
 
     fired = {f.check_id for f in result.findings
@@ -136,7 +148,8 @@ def main(argv=None) -> int:
             print(f"   {cid}: {f.summary}")
 
     detected = len(expected & fired)
-    print(f"\ndetected {detected}/{len(expected)} seeded defects; "
+    print(f"\nscope={ctx.scope} window={ctx.window_label}")
+    print(f"detected {detected}/{len(expected)} seeded defects; "
           f"{len(result.findings)} checks ran in "
           f"{result.duration_ms / 1000:.1f}s; score {result.score()}")
     print("PASS" if ok else "FAILED")

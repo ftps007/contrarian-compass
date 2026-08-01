@@ -33,7 +33,7 @@ def check_stocks_without_prices(ctx: Context):
     ratio = n / total
     # Index members with no prices at all are the real problem; a random
     # untraded symbol in `stocks` is harmless.
-    uni = ctx.universe_ids
+    uni = ctx.target_ids
     in_uni = int(ctx.scalar("""
         SELECT COUNT(*) FROM stocks s
          WHERE s.id = ANY(%s)
@@ -51,7 +51,7 @@ def check_stocks_without_prices(ctx: Context):
         "Tickers in stocks have price history",
         Status.FAIL if in_uni else Status.INFO,
         f"{n:,}/{total:,} ({pct(ratio)}) tickers have no price rows at all; "
-        f"{in_uni} of them are active {ctx.universe} members",
+        f"{in_uni} of them are active {ctx.member_label}s",
         metrics={"count": n, "total": total, "in_universe": in_uni},
         samples=samples,
         remediation="An index member with zero price history is invisible to "
@@ -65,7 +65,7 @@ def check_stocks_without_prices(ctx: Context):
        "Universe resolves to a plausible member count", min_profile="quick")
 def check_universe_resolution(ctx: Context):
     syms = ctx.universe_index_symbols()
-    uni = ctx.universe_stocks
+    uni = ctx.target_stocks
     if not uni:
         return Finding(
             "cover.universe_resolution", "coverage",
@@ -105,17 +105,17 @@ def check_panel_completeness(ctx: Context):
     the period it could actually have traded rather than penalised for not
     existing yet.
     """
-    uni = ctx.universe_ids
+    uni = ctx.target_ids
     if not uni:
         return Finding("cover.panel_completeness", "coverage",
                        "Universe panels are complete over the sim lookback",
-                       Status.SKIP, f"universe {ctx.universe!r} resolved to 0 stocks")
+                       Status.SKIP, f"{ctx.scope_label} resolved to 0 stocks")
     b = ctx.benchmark
     if not b:
         return Finding("cover.panel_completeness", "coverage",
                        "Universe panels are complete over the sim lookback",
                        Status.SKIP, "no benchmark to build a calendar from")
-    since = ctx.today - timedelta(days=ctx.t.sim_lookback_days)
+    since = ctx.sim_since
     rows = ctx.query_dicts("""
         WITH cal AS (
             SELECT date FROM price_data
@@ -159,8 +159,8 @@ def check_panel_completeness(ctx: Context):
     return Finding(
         "cover.panel_completeness", "coverage",
         "Universe panels are complete over the sim lookback", status,
-        f"{ready:,}/{total:,} ({pct(ready_ratio)}) of the {ctx.universe} universe "
-        f"has a simulation-ready panel over the last {ctx.t.sim_lookback_days}d "
+        f"{ready:,}/{total:,} ({pct(ready_ratio)}) of the {ctx.scope_label} "
+        f"has a simulation-ready panel over {ctx.sim_since_label} "
         f"({len(incomplete)} gappy, {len(thin)} shorter than "
         f"{ctx.t.min_history_rows} rows, {no_data} with no data)",
         metrics={"universe_size": total, "ready": ready,
@@ -193,13 +193,13 @@ def check_interior_gaps(ctx: Context):
     MAX(date)+1 forward, so any gap behind the newest row stays forever unless
     --since is used explicitly.
     """
-    uni = ctx.universe_ids
+    uni = ctx.target_ids
     b = ctx.benchmark
     if not uni or not b:
         return Finding("cover.interior_gaps", "coverage",
                        "No interior gaps in ticker histories", Status.SKIP,
                        "no universe or benchmark available")
-    since = ctx.today - timedelta(days=min(ctx.window_days, ctx.t.sim_lookback_days))
+    since = max(ctx.window_start, ctx.sim_since)
     rows = ctx.query_dicts("""
         WITH cal AS (
             SELECT date, ROW_NUMBER() OVER (ORDER BY date) AS idx
@@ -232,7 +232,7 @@ def check_interior_gaps(ctx: Context):
         "No interior gaps in ticker histories",
         Status.FAIL if big else Status.WARN,
         f"{len(rows)} interior gap(s) across "
-        f"{len({r['ticker'] for r in rows})} {ctx.universe} member(s); "
+        f"{len({r['ticker'] for r in rows})} {ctx.member_label}(s); "
         f"{len(big)} span 5+ trading days",
         metrics={"gaps": len(rows), "large_gaps": len(big),
                  "tickers": len({r["ticker"] for r in rows})},
@@ -392,12 +392,12 @@ def check_simulation_gate(ctx: Context):
     Rolls the individual coverage signals into one go/no-go, because that is
     the question actually being asked before a rebalance.
     """
-    uni = ctx.universe_ids
+    uni = ctx.target_ids
     if not uni:
         return Finding("cover.simulation_gate", "coverage",
                        "Simulation readiness gate", Status.SKIP,
-                       f"universe {ctx.universe!r} resolved to 0 stocks")
-    since = ctx.today - timedelta(days=ctx.t.sim_lookback_days)
+                       f"{ctx.scope_label} resolved to 0 stocks")
+    since = ctx.sim_since
     row = ctx.query_dicts("""
         SELECT COUNT(*) AS ready FROM (
             SELECT p.stock_id
@@ -416,9 +416,9 @@ def check_simulation_gate(ctx: Context):
                             ctx.t.universe_ready_pct_fail)
     return Finding(
         "cover.simulation_gate", "coverage", "Simulation readiness gate", status,
-        f"{ready:,}/{len(uni):,} ({pct(ratio)}) {ctx.universe} members are both "
-        f"current and carry >= {ctx.t.min_history_rows} closes over the last "
-        f"{ctx.t.sim_lookback_days}d",
+        f"{ready:,}/{len(uni):,} ({pct(ratio)}) {ctx.member_label}s are both "
+        f"current and carry >= {ctx.t.min_history_rows} closes over "
+        f"{ctx.sim_since_label}",
         metrics={"ready": ready, "universe_size": len(uni),
                  "ready_ratio": round(ratio, 4),
                  "min_history_rows": ctx.t.min_history_rows,
