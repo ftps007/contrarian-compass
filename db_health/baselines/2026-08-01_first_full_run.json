@@ -1,0 +1,442 @@
+{
+  "started_at": "2026-08-01T22:07:23",
+  "profile": "standard",
+  "universe": "all_us",
+  "window_days": 400,
+  "status": "FAIL",
+  "score": 78.6,
+  "counts": {
+    "PASS": 25,
+    "INFO": 7,
+    "SKIP": 0,
+    "WARN": 15,
+    "FAIL": 8,
+    "ERROR": 0
+  },
+  "note": "Reconstructed from the terminal report of the first full run. Statuses and headline metrics only \u2014 samples and remediation text are not preserved.",
+  "findings": [
+    {
+      "check_id": "corrupt.adj_factor_stale",
+      "status": "WARN",
+      "metrics": {
+        "count": 1,
+        "in_universe": 0
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "corrupt.bad_ticks",
+      "status": "WARN",
+      "metrics": {
+        "count": 343
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "corrupt.extreme_returns",
+      "status": "INFO",
+      "metrics": {
+        "count": 500
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "corrupt.flatline",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "corrupt.split_artifact",
+      "status": "FAIL",
+      "metrics": {
+        "count": 1380,
+        "tickers": 867,
+        "universe_tickers_n": 79
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "cover.history_depth",
+      "status": "INFO",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "cover.interior_gaps",
+      "status": "FAIL",
+      "metrics": {
+        "gaps": 31,
+        "tickers": 25,
+        "large_gaps": 6
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "cover.panel_completeness",
+      "status": "PASS",
+      "metrics": {
+        "ready": 2515,
+        "universe_size": 2518
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "cover.simulation_gate",
+      "status": "PASS",
+      "metrics": {
+        "ready": 2474,
+        "universe_size": 2518
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "cover.sp500_members_at",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "cover.stocks_without_prices",
+      "status": "INFO",
+      "metrics": {
+        "count": 89,
+        "in_universe": 0
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "cover.survivorship",
+      "status": "PASS",
+      "metrics": {
+        "total_events": 1159
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "cover.universe_resolution",
+      "status": "PASS",
+      "metrics": {
+        "members": 2518
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "fresh.benchmark",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "fresh.catalysts",
+      "status": "FAIL",
+      "metrics": {
+        "age_days": 78
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "fresh.financials",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "fresh.fundamentals",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "fresh.latest_day_coverage",
+      "status": "PASS",
+      "metrics": {
+        "covered": 2471,
+        "universe_size": 2518
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "fresh.load_continuity",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "fresh.memberships",
+      "status": "WARN",
+      "metrics": {
+        "stale": 4,
+        "total": 12
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "fresh.partial_load_days",
+      "status": "FAIL",
+      "metrics": {
+        "count": 3,
+        "severe": 3
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "fresh.prices",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "fresh.stale_tickers",
+      "status": "WARN",
+      "metrics": {
+        "stale": 1098,
+        "total": 11134,
+        "stale_in_universe": 43
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "fund.coverage",
+      "status": "PASS",
+      "metrics": {
+        "covered": 2518,
+        "universe_size": 2518
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "fund.empty_snapshots",
+      "status": "FAIL",
+      "metrics": {
+        "empty": 13,
+        "masking_current": 11
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "fund.future_snapshots",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "fund.plausibility",
+      "status": "WARN",
+      "metrics": {
+        "count": 29
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "fund.snapshot_recency",
+      "status": "WARN",
+      "metrics": {
+        "stale": 200,
+        "universe_size": 2518
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "idx.duplicate_members",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "idx.inactive_but_traded",
+      "status": "WARN",
+      "metrics": {
+        "count": 500
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "idx.member_counts",
+      "status": "WARN",
+      "metrics": {
+        "per_index": {
+          "RUA": 2506
+        }
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "inv.census",
+      "status": "FAIL",
+      "metrics": {
+        "tickers": 11134,
+        "total_rows": 36247843,
+        "bad": 5087,
+        "grades": {
+          "OK": 5435,
+          "APPROX": 8,
+          "STALE": 604,
+          "GAPPY": 39,
+          "CORRUPT": 4959,
+          "EMPTY": 89
+        }
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "inv.orphan_tickers",
+      "status": "WARN",
+      "metrics": {
+        "orphans": 5288,
+        "unusable": 2749
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "ops.autovacuum",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "ops.long_running",
+      "status": "WARN",
+      "metrics": {
+        "count": 1
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "ops.planner_stats",
+      "status": "WARN",
+      "metrics": {
+        "count": 1
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "ops.server",
+      "status": "INFO",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "ops.table_sizes",
+      "status": "INFO",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "ret.adj_close_usable",
+      "status": "WARN",
+      "metrics": {
+        "differing": 147,
+        "with_pair": 2518
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "ret.signal_basis",
+      "status": "INFO",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "ret.total_return_gap",
+      "status": "INFO",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "schema.duplicate_prices",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "schema.foreign_keys",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "schema.orphan_rows",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "schema.price_columns",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "schema.price_key",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "schema.redundant_indexes",
+      "status": "WARN",
+      "metrics": {
+        "count": 5,
+        "wasted_mb": 1.0
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "schema.stocks_columns",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "schema.tables",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "valid.calendar_alignment",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    },
+    {
+      "check_id": "valid.null_adj_close",
+      "status": "WARN",
+      "metrics": {
+        "count": 88
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "valid.null_close",
+      "status": "WARN",
+      "metrics": {
+        "count": 5
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "valid.ohlc",
+      "status": "FAIL",
+      "metrics": {
+        "count": 5000
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "valid.price_range",
+      "status": "FAIL",
+      "metrics": {
+        "count": 396
+      },
+      "summary": ""
+    },
+    {
+      "check_id": "valid.volume",
+      "status": "PASS",
+      "metrics": {},
+      "summary": ""
+    }
+  ]
+}
