@@ -32,13 +32,15 @@ _GLYPH = {
 }
 
 CATEGORY_ORDER = ["freshness", "coverage", "inventory", "corruption",
-                  "validity", "fundamentals", "indices", "schema", "operations"]
+                  "validity", "returns", "fundamentals", "indices", "schema",
+                  "operations"]
 
 CATEGORY_BLURB = {
     "freshness":    "is the data as new as it should be",
     "coverage":     "is the panel complete enough to simulate on",
     "inventory":    "every ticker in the DB, over its entire history",
     "corruption":   "silent data defects that distort simulations",
+    "returns":      "price vs total return, and what the difference costs",
     "validity":     "per-row invariants that must always hold",
     "fundamentals": "quality of the factor inputs",
     "indices":      "universe definition and membership",

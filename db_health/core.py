@@ -180,6 +180,10 @@ class Thresholds:
     # expected-session counts for older series are unreliable and completeness
     # is reported as approximate rather than as a defect.
     calendar_reliable_from: date = date(1970, 1, 1)
+    # Median annualised price-vs-total-return gap, in percentage points,
+    # above which measuring returns on `close` stops being a rounding error
+    # and starts reordering backtest conclusions.
+    total_return_gap_warn_pp: float = 1.5
     # Database-wide grade mix tolerated before the census escalates.
     inventory_bad_pct_warn: float = 0.05
     inventory_bad_pct_fail: float = 0.15

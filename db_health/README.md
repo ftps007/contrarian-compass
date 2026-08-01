@@ -7,7 +7,7 @@ contrarian screener and every backtest:
 postgres://localhost:5432/stock_data
 ```
 
-59 checks across nine categories, built around one question: **can I trust a
+62 checks across ten categories, built around one question: **can I trust a
 contrarian simulation run against this database right now?**
 
 > **Where this belongs.** The database, its migrations and `update_stock_data.py`
@@ -277,6 +277,21 @@ three days late.
 poisons beta and Sharpe for the whole panel), `valid.null_close`,
 `valid.null_adj_close`, `valid.volume`, `valid.calendar_alignment` (weekend
 rows; future-dated rows leak lookahead into every `date <= eval_date` filter).
+
+### `returns` — price vs total return, and what it costs
+
+`price_data` stores `close` (split-adjusted) and `adj_close` (split *and*
+dividend adjusted). Every consumer reads `close`; nothing reads `adj_close`.
+These checks measure what that costs on the real data rather than assuming it.
+
+| Check | What it reports |
+|---|---|
+| `ret.total_return_gap` | Per-ticker price return vs total return over the window, annualised. INFO below `total_return_gap_warn_pp` (1.5pp/yr) — a dividend yield is not a defect until it is big enough to reorder a backtest's conclusions. |
+| `ret.adj_close_usable` | Whether `adj_close` actually differs from `close`. If the two are equal everywhere, no dividend information is stored and total return is unrecoverable from the table. |
+| `ret.signal_basis` | How far the drawdown signal would move if it were computed on `adj_close`. Guards the over-correction: **signals belong on `close`**, and this quantifies what "fixing" them too would give up. |
+
+See `pipeline/README.md` for the fix — it changes the return measurement only,
+not the signals.
 
 ### `fundamentals`
 

@@ -30,6 +30,7 @@ from . import checks_coverage    # noqa: F401
 from . import checks_fundamentals  # noqa: F401
 from . import checks_ops         # noqa: F401
 from . import checks_inventory  # noqa: F401
+from . import checks_returns    # noqa: F401
 
 
 DEFAULT_DSN_PARTS = {

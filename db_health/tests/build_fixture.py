@@ -149,6 +149,21 @@ def build(conn, *, today: date, years: int = 3, seed: int = 42,
                      close if adj is MIRROR else adj,
                      rng.randint(500_000, 20_000_000) if volume is None else volume))
 
+    # Dividend yields. adj_close(t) = close(t) x exp(-yield x years_remaining),
+    # which is 1.0 at the newest bar and steps down going back — the same shape
+    # a real accumulated adjustment factor has. Without this the fixture would
+    # carry adj_close == close everywhere, no dividend information at all, and
+    # the total-return checks would measure a gap of zero for the wrong reason.
+    yields = {t: (0.0 if rng.random() < 0.3 else rng.uniform(0.01, 0.055))
+              for t in ["SPY"] + tickers_to_build}
+
+    def adj_factor(tkr: str, i: int, n: int) -> float:
+        y = yields.get(tkr, 0.0)
+        if not y:
+            return 1.0
+        years_remaining = (n - 1 - i) / 252.0
+        return math.exp(-y * years_remaining)
+
     def walk(tkr: str, start_px: float, days: list[date]) -> list[float]:
         px, out = start_px, []
         for _ in days:
@@ -157,8 +172,9 @@ def build(conn, *, today: date, years: int = 3, seed: int = 42,
         return out
 
     # Benchmark — always clean, defines the reference calendar.
-    for d, px in zip(sessions, walk("SPY", 400.0, sessions)):
-        emit("SPY", d, px)
+    spy_px = walk("SPY", 400.0, sessions)
+    for i, (d, px) in enumerate(zip(sessions, spy_px)):
+        emit("SPY", d, px, adj=round(px * adj_factor("SPY", i, len(sessions)), 4))
 
     for tkr in tickers_to_build:
         if tkr == "NOPRICE":
@@ -179,7 +195,7 @@ def build(conn, *, today: date, years: int = 3, seed: int = 42,
         px = walk(tkr, rng.uniform(20, 300), days)
 
         for i, (d, p) in enumerate(zip(days, px)):
-            adj: object = p
+            adj: object = round(p * adj_factor(tkr, i, len(days)), 4)
             vol = None
             hi = lo = op = None
 
@@ -187,7 +203,7 @@ def build(conn, *, today: date, years: int = 3, seed: int = 42,
                 # DEFECT corrupt.split_artifact: history before the "split" was
                 # never re-adjusted, so close AND adj_close step down together
                 # by exactly 1/2 on one day and stay there.
-                p, adj = round(p / 2, 4), round(p / 2, 4)
+                p = adj = round(p / 2, 4)
             if tkr == "BADTICK" and i == len(days) - 25:
                 p = adj = round(p * 1.9, 4)            # DEFECT: spike, reverts
             if tkr == "OHLCBAD" and i == len(days) - 15:

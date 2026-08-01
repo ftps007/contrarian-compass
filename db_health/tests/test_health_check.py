@@ -67,6 +67,10 @@ IGNORE = {
     "fresh.financials", "fresh.catalysts",
     "cover.survivorship",
     "inv.orphan_tickers",        # INFO/WARN on fixture size, not a defect
+    # The returns checks are measurements, not defect detectors: they report
+    # the size of the price-vs-total-return gap, which is a property of the
+    # data (dividends exist) rather than something wrong with it.
+    "ret.total_return_gap", "ret.signal_basis", "ret.adj_close_usable",
 }
 
 
