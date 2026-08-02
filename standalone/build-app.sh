@@ -5,6 +5,7 @@
 #
 #   ./standalone/build-app.sh              -> ~/Applications (shows up in Launchpad)
 #   ./standalone/build-app.sh --open       -> install and start it right away
+#   ./standalone/build-app.sh --fenster    -> own window via Chrome instead of a browser tab
 #   ./standalone/build-app.sh /Applications
 #
 set -euo pipefail
@@ -14,10 +15,12 @@ HTML="$HERE/Metadaten-Editor.html"
 ICON="$HERE/icon.icns"
 
 OPEN_AFTER=false
+APP_WINDOW=false
 TARGET_DIR=""
 for arg in "$@"; do
   case "$arg" in
     --open) OPEN_AFTER=true ;;
+    --fenster|--window) APP_WINDOW=true ;;
     *) TARGET_DIR="$arg" ;;
   esac
 done
@@ -38,7 +41,7 @@ fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$HTML" "$APP/Contents/Resources/Metadaten-Editor.html"
-[ -f "$ICON" ] && cp "$ICON" "$APP/Contents/Resources/icon.icns"
+if [ -f "$ICON" ]; then cp "$ICON" "$APP/Contents/Resources/icon.icns"; fi
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -60,18 +63,36 @@ PLIST
 
 cat > "$APP/Contents/MacOS/metadaten-editor" <<'LAUNCHER'
 #!/bin/bash
-# Shows the bundled page. With a Chrome-family browser installed it runs in its
-# own window without tabs or address bar, in a browser profile used by nothing
-# else. Otherwise it falls back to the default browser.
+# Hands the bundled page to the default browser. This is the dependable route:
+# every browser opens a local file this way.
 RESOURCES="$(cd "$(dirname "${BASH_SOURCE[0]}")/../Resources" && pwd)"
-PAGE="file://$RESOURCES/Metadaten-Editor.html"
+PAGE="$RESOURCES/Metadaten-Editor.html"
+
+if [ ! -f "$PAGE" ]; then
+  osascript -e 'display alert "Metadaten-Editor" message "Die Seite fehlt im Programmpaket. Bitte build-app.sh erneut ausführen."' >/dev/null 2>&1
+  exit 1
+fi
+
+if ! open "$PAGE"; then
+  osascript -e "display alert \"Metadaten-Editor\" message \"Die Seite konnte nicht geöffnet werden: $PAGE\"" >/dev/null 2>&1
+  exit 1
+fi
+LAUNCHER
+
+if [ "$APP_WINDOW" = true ]; then
+  cat > "$APP/Contents/MacOS/metadaten-editor" <<'LAUNCHER'
+#!/bin/bash
+# Own window without tabs or address bar, in a browser profile used by nothing
+# else. Needs a Chrome-family browser; falls back to the default browser.
+RESOURCES="$(cd "$(dirname "${BASH_SOURCE[0]}")/../Resources" && pwd)"
+PAGE="$RESOURCES/Metadaten-Editor.html"
 PROFILE="$HOME/Library/Application Support/Metadaten-Editor/browser"
 
 while IFS= read -r BROWSER; do
   if [ -x "$BROWSER" ]; then
     mkdir -p "$PROFILE"
     exec "$BROWSER" \
-      --app="$PAGE" \
+      --app="file://$PAGE" \
       --user-data-dir="$PROFILE" \
       --window-size=1180,900 \
       --no-first-run \
@@ -84,13 +105,9 @@ done <<'BROWSERS'
 /Applications/Chromium.app/Contents/MacOS/Chromium
 BROWSERS
 
-# No Chrome-family browser: hand the page to the default browser. If even that
-# fails, say so on screen instead of quitting without a trace.
-if ! open "$PAGE"; then
-  osascript -e "display alert \"Metadaten-Editor\" message \"Die Seite konnte nicht geöffnet werden: $PAGE\"" >/dev/null 2>&1
-  exit 1
-fi
+open "$PAGE"
 LAUNCHER
+fi
 
 chmod +x "$APP/Contents/MacOS/metadaten-editor"
 
@@ -106,6 +123,11 @@ touch "$APP" 2>/dev/null || true
 
 echo "Installiert: $APP"
 echo "Zu finden über Launchpad, Spotlight (cmd+Leertaste) oder den Programme-Ordner."
+if [ "$APP_WINDOW" = true ]; then
+  echo "Startmodus: eigenes Fenster über einen Chrome-Browser."
+else
+  echo "Startmodus: Standardbrowser. Für ein eigenes Fenster: erneut mit --fenster aufrufen."
+fi
 
 if [ "$OPEN_AFTER" = true ]; then
   open "$APP"

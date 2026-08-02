@@ -6,6 +6,8 @@
 ./standalone/build-app.sh --open
 ```
 
+Mit `--fenster` startet die App in einem eigenen Fenster statt im Standardbrowser — siehe unten.
+
 Legt `Metadaten-Editor.app` in `~/Applications` an, registriert sie bei Launch Services und startet
 sie gleich. Danach ist sie über Launchpad, Spotlight (cmd+Leertaste) und den App-Umschalter
 erreichbar wie jedes andere Programm.
@@ -22,10 +24,14 @@ Gatekeeper-Nachfrage. Deinstallieren heißt: App in den Papierkorb ziehen.
 ## Wie sie läuft
 
 Die App ist ein Bundle um eine einzelne HTML-Datei — kein Server, kein Netz, keine Laufzeit-
-Abhängigkeit. Ist Chrome, Edge, Brave oder Chromium installiert, öffnet sie sich in einem eigenen
-Fenster ohne Tabs und Adresszeile, in einem separaten Browserprofil unter
-`~/Library/Application Support/Metadaten-Editor/`, das sonst nichts benutzt. Ohne einen dieser
-Browser fällt sie auf den Standardbrowser zurück und erscheint dort als normaler Tab.
+Abhängigkeit. Beim Start übergibt sie die Seite dem Standardbrowser; das funktioniert mit jedem
+Browser zuverlässig.
+
+Wer lieber ein eigenes Fenster ohne Tabs und Adresszeile möchte, baut die App mit `--fenster`. Dann
+startet sie Chrome, Edge, Brave oder Chromium im App-Modus, mit einem separaten Browserprofil unter
+`~/Library/Application Support/Metadaten-Editor/`, das sonst nichts benutzt. Dieser Modus hängt vom
+Browser ab: manche Chrome-Fassungen öffnen lokale Dateien im App-Modus nicht und zeigen dann ein
+leeres Fenster. Falls das passiert, die App ohne `--fenster` neu bauen.
 
 Weil die Anzeige ein Browser übernimmt, kann im Dock der Name bzw. das Symbol des Browsers stehen
 statt das der App — das wäre nur mit einer nativen Hülle (Electron & Co.) zu ändern, die aus
