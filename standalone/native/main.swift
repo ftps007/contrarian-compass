@@ -21,7 +21,7 @@ import WebKit
 // Log — the installer's self-test reads this to confirm the app really started
 // ---------------------------------------------------------------------------
 
-func log(_ message: String) {
+func protokolliere(_ message: String) {
     let directory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs", isDirectory: true)
     let file = directory.appendingPathComponent("Metadaten-Editor.log")
@@ -58,7 +58,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1180, height: 900), configuration: configuration)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.setValue(false, forKey: "drawsBackground")
 
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1180, height: 900),
@@ -83,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             return
         }
 
-        log("Start (nativ, Seite: \(page.path))")
+        protokolliere("Start (nativ, Seite: \(page.path))")
         webView.loadFileURL(page, allowingReadAccessTo: resources)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -93,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     private func fail(_ message: String) {
-        log("FEHLER: \(message)")
+        protokolliere("FEHLER: \(message)")
         let alert = NSAlert()
         alert.messageText = "Metadaten-Editor"
         alert.informativeText = message
@@ -104,7 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     // --- Page loading ------------------------------------------------------
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        log("OK: Oberfläche geladen")
+        protokolliere("OK: Oberfläche geladen")
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -146,7 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             let encoded = body["daten"] as? String,
             let data = Data(base64Encoded: encoded)
         else {
-            log("FEHLER: Speicheranfrage war unvollständig")
+            protokolliere("FEHLER: Speicheranfrage war unvollständig")
             return
         }
 
@@ -154,16 +153,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         panel.nameFieldStringValue = name
         panel.canCreateDirectories = true
         panel.message = "Bereinigte Datei sichern"
-        panel.beginSheetModal(for: window) { [weak self] response in
+        panel.beginSheetModal(for: window) { response in
             guard response == .OK, let url = panel.url else {
-                self?.log("Speichern abgebrochen: \(name)")
+                protokolliere("Speichern abgebrochen: \(name)")
                 return
             }
             do {
                 try data.write(to: url)
-                self?.log("Gesichert: \(url.path) (\(data.count) Bytes)")
+                protokolliere("Gesichert: \(url.path) (\(data.count) Bytes)")
             } catch {
-                self?.log("FEHLER beim Sichern: \(error.localizedDescription)")
+                protokolliere("FEHLER beim Sichern: \(error.localizedDescription)")
                 let alert = NSAlert()
                 alert.messageText = "Sichern fehlgeschlagen"
                 alert.informativeText = error.localizedDescription
@@ -172,9 +171,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
-    private func log(_ message: String) {
-        Swift.log(message)
-    }
 }
 
 // ---------------------------------------------------------------------------

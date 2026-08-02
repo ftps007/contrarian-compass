@@ -82,18 +82,19 @@ if [ "$MODE" = auto ] || [ "$MODE" = nativ ]; then
     if [ "$MODE" = nativ ]; then exit 1; fi
   else
     echo "Baue die native App (das dauert einen Moment)…"
-    BUILD_LOG="$(mktemp)"
+    BUILD_LOG="/tmp/metadaten-editor-build.log"
     if swiftc -O "$SWIFT_SOURCE" -o "$EXECUTABLE" >"$BUILD_LOG" 2>&1; then
       NATIVE=true
       echo "  ok    übersetzt"
+      rm -f "$BUILD_LOG"
     else
       echo "  FEHLT Übersetzung fehlgeschlagen:" >&2
       sed 's/^/        /' "$BUILD_LOG" >&2
-      if [ "$MODE" = nativ ]; then rm -f "$BUILD_LOG"; exit 1; fi
-      FALLBACK_REASON="Die Übersetzung der nativen App ist fehlgeschlagen (Meldungen oben)."
+      echo "        Vollständige Meldungen: $BUILD_LOG" >&2
+      if [ "$MODE" = nativ ]; then exit 1; fi
+      FALLBACK_REASON="Die Übersetzung ist fehlgeschlagen, Meldungen in $BUILD_LOG."
       echo "        Es wird stattdessen die Browser-Variante gebaut." >&2
     fi
-    rm -f "$BUILD_LOG"
   fi
 fi
 
