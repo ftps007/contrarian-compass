@@ -30,6 +30,8 @@ const marker = '      /* BUNDLE */\n'
 if (!template.includes(marker)) throw new Error('Marker /* BUNDLE */ fehlt in template.html')
 
 await mkdir(dirname(outFile), { recursive: true })
-await writeFile(outFile, template.replace(marker, script))
+// A replacer function is required: the bundle contains "$&" and friends,
+// which String.replace would otherwise expand as substitution patterns.
+await writeFile(outFile, template.replace(marker, () => script))
 
 console.log(`Geschrieben: ${outFile}`)

@@ -307,12 +307,12 @@ export async function cleanFile(
         }
       }
       if (options.base.stripComments) {
-        stripCommentsFromPackage(entries)
-        steps.push('Kommentare und Personenliste entfernt')
+        const removed = stripCommentsFromPackage(entries)
+        if (removed.length > 0) steps.push(`Kommentare und Personenliste entfernt (${removed.length} Teil(e))`)
       }
       if (options.base.stripRsids) {
-        stripRsidsFromPackage(entries)
-        steps.push('Word-RSIDs entfernt')
+        const touched = stripRsidsFromPackage(entries)
+        if (touched.length > 0) steps.push(`Word-RSIDs aus ${touched.length} Teil(en) entfernt`)
       }
 
       const deep = await applyDeepClean(entries, options.deep)

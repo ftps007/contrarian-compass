@@ -32,7 +32,7 @@
       p { margin: 0 0 .75rem; }
       .lede { color: var(--stone-600); margin-bottom: 2rem; }
       .hidden { display: none !important; }
-      .hint { color: var(--stone-500); font-size: .8125rem; margin: .25rem 0 0; }
+      .hint { color: var(--stone-500); font-size: .8125rem; margin: .25rem 0 0; display: block; }
 
       #dropzone {
         border: 2px dashed var(--stone-300);
@@ -73,46 +73,64 @@
         background: #fff;
       }
       .field input:focus, .field textarea:focus { outline: none; border-color: var(--amber-700); }
-      .custom-row { display: flex; align-items: flex-end; gap: .75rem; margin-bottom: .75rem; }
-      .custom-row .field { flex: 1; }
 
-      .actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1.5rem; }
-      button {
-        font: inherit;
-        font-size: .875rem;
-        border: none;
+      #profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .75rem; }
+      .profile {
+        text-align: left;
+        border: 1px solid var(--stone-300);
         border-radius: .375rem;
-        padding: .5rem .9rem;
-        background: var(--stone-200);
-        color: var(--stone-700);
+        background: #fff;
+        padding: .75rem;
         cursor: pointer;
+        font: inherit;
       }
-      button:hover { background: var(--stone-300); }
-      button.primary { background: var(--amber-800); color: #fff; padding: .75rem 1.5rem; font-weight: 600; }
-      button.primary:hover { background: #7c2d12; }
-      button:disabled { opacity: .5; cursor: default; }
-      button.ghost { background: var(--stone-200); }
-      button.danger:hover { background: #fee2e2; color: #991b1b; }
-      #revert { background: none; color: var(--stone-600); text-decoration: underline; padding-left: 0; }
+      .profile:hover { border-color: var(--amber-700); }
+      .profile.active { border-color: var(--amber-800); background: #fffbeb; }
+      .profile-label { display: block; font-weight: 600; color: var(--stone-800); }
+
+      .file-row {
+        display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+        width: 100%; padding: .75rem .5rem; text-align: left; background: none; border: none;
+        border-bottom: 1px solid var(--stone-200); cursor: pointer; font: inherit;
+      }
+      .file-row:hover { background: var(--stone-50); }
+      .file-row.active { background: #fffbeb; }
+      .file-main { min-width: 0; }
+      .file-name { display: block; font-weight: 600; color: var(--stone-800); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .badges { display: flex; gap: .35rem; flex-shrink: 0; }
+
+      .badge { border-radius: .25rem; padding: .1rem .4rem; font-size: .6875rem; background: var(--stone-200); color: var(--stone-700); }
+      .badge.hoch { background: #fee2e2; color: #991b1b; }
+      .badge.mittel { background: #fef3c7; color: #78350f; }
+      .badge.niedrig { background: var(--stone-200); color: var(--stone-700); }
+      .badge.ok { background: #dcfce7; color: #166534; }
+
+      #findings { list-style: none; margin: 0; padding: 0; }
+      #findings li { border-left: 2px solid var(--stone-300); padding-left: .75rem; margin-bottom: .85rem; }
+      .finding-label { font-size: .875rem; font-weight: 600; color: var(--stone-700); margin: 0; }
 
       .check { display: flex; gap: .75rem; margin-bottom: .85rem; }
       .check input { margin-top: .25rem; accent-color: var(--amber-800); }
       .check-label { display: block; font-size: .875rem; font-weight: 600; color: var(--stone-700); }
 
-      #traces { list-style: none; margin: 0; padding: 0; }
-      #traces li { border-left: 2px solid var(--stone-300); padding-left: .75rem; margin-bottom: .85rem; }
-      .trace-label { font-size: .875rem; font-weight: 600; color: var(--stone-700); margin: 0; }
-      .badge {
-        margin-left: .5rem;
-        background: #fee2e2;
-        color: #991b1b;
-        border-radius: .25rem;
-        padding: .1rem .4rem;
-        font-size: .6875rem;
-        font-weight: 500;
+      .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin-top: 1.5rem; }
+      button {
+        font: inherit; font-size: .875rem; border: none; border-radius: .375rem;
+        padding: .5rem .9rem; background: var(--stone-200); color: var(--stone-700); cursor: pointer;
       }
+      button:hover { background: var(--stone-300); }
+      button.primary { background: var(--amber-800); color: #fff; padding: .75rem 1.5rem; font-weight: 600; }
+      button.primary:hover { background: #7c2d12; }
+      button:disabled { opacity: .5; cursor: default; }
+      button.link { background: none; color: var(--stone-600); text-decoration: underline; padding-left: 0; }
 
-      .save-row { display: flex; align-items: center; gap: 1rem; margin-top: 1.5rem; }
+      .result { margin-bottom: 1.25rem; }
+      .result ul { margin: .5rem 0 0; padding-left: 1.25rem; font-size: .875rem; color: var(--stone-600); }
+      .hash { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem; color: var(--stone-500); margin: .25rem 0 0; }
+      .ok-text { color: #166534; font-size: .875rem; margin-top: .5rem; }
+      .warn-text { color: #92400e; font-size: .875rem; margin-top: .5rem; }
+      .error-text { color: #991b1b; font-size: .875rem; margin-top: .25rem; }
+
       .notice { background: var(--stone-100); border: 1px solid var(--stone-300); }
       .notice ul { margin: 0 0 .75rem; padding-left: 1.25rem; color: var(--stone-600); font-size: .875rem; }
       .notice li { margin-bottom: .25rem; }
@@ -123,78 +141,64 @@
     <main>
       <h1>Metadaten-Editor</h1>
       <p class="lede">
-        Office-Datei hierher ziehen, Eigenschaften bearbeiten, neu speichern. Alles passiert lokal in diesem
-        Fenster — es wird nichts hochgeladen, und es läuft ohne Internetverbindung.
+        Dateien oder ganze Ordner hierher ziehen. Prüfen, bereinigen, herunterladen — alles passiert lokal in diesem
+        Fenster, ohne Internetverbindung.
       </p>
 
       <div id="dropzone">
-        <div id="dropzone-name">Datei hierher ziehen oder klicken</div>
+        <div id="dropzone-name">Dateien oder Ordner hierher ziehen</div>
         <div id="dropzone-formats"></div>
-        <input type="file" id="file-input" class="hidden" />
+        <input type="file" id="file-input" class="hidden" multiple />
       </div>
 
       <div id="message" class="hidden"></div>
 
       <div id="editor" class="hidden">
+        <section>
+          <h2>Profil</h2>
+          <div id="profiles"></div>
+        </section>
+
+        <section>
+          <h2>Dateien</h2>
+          <p class="hint">Zum Bearbeiten der Eigenschaften eine Datei auswählen.</p>
+          <div id="file-list"></div>
+          <button id="clear" class="link">Liste leeren</button>
+        </section>
+
+        <div id="fields"></div>
+
+        <section id="findings-section" class="hidden">
+          <h2 id="findings-title">Befund</h2>
+          <ul id="findings"></ul>
+        </section>
+
+        <div id="options"></div>
+
         <div class="actions">
-          <button id="clear-all">Alle Felder leeren</button>
-          <button id="same-author">Autor auch als „zuletzt geändert von"</button>
-          <button id="reset-counters">Zähler zurücksetzen</button>
-          <button id="now">Datum auf jetzt</button>
+          <button id="clean" class="primary">Bereinigen</button>
+          <button id="download" class="hidden">Herunterladen</button>
+          <button id="report" class="link hidden">Protokoll herunterladen</button>
         </div>
 
-        <section>
-          <h2>Dokumenteigenschaften</h2>
-          <div id="core-fields" class="grid"></div>
+        <section id="results-section" class="hidden">
+          <h2>Protokoll</h2>
+          <div id="results"></div>
         </section>
-
-        <section>
-          <h2>Erweiterte Eigenschaften</h2>
-          <div id="app-fields" class="grid"></div>
-        </section>
-
-        <section id="custom-section" class="hidden">
-          <h2>Benutzerdefinierte Eigenschaften</h2>
-          <div id="custom-props"></div>
-        </section>
-
-        <section>
-          <h2>Zusätzliche Spuren</h2>
-          <div id="cleanup"></div>
-        </section>
-
-        <section>
-          <h2>In dieser Datei gefunden</h2>
-          <ul id="traces"></ul>
-        </section>
-
-        <div class="save-row">
-          <button id="save" class="primary">Bearbeitete Datei speichern</button>
-          <button id="revert">Änderungen verwerfen</button>
-        </div>
       </div>
 
       <section class="notice">
         <h2>Was dieses Tool nicht kann</h2>
-        <p>
-          Bearbeitete Metadaten sind kein sauberer Zustand — sie sind ein bearbeiteter Zustand. Außerhalb der Datei
-          bleiben Spuren, an die kein Editor herankommt:
-        </p>
         <ul>
-          <li>Zeitstempel des Dateisystems (Erstellt/Geändert/Zugriff) — beim Speichern immer neu gesetzt.</li>
-          <li>Versionsverlauf in OneDrive, SharePoint, Google Drive, Dropbox oder einem DMS.</li>
-          <li>Kopien, die bereits per Mail, Chat oder Backup verschickt wurden.</li>
-          <li>
-            Kompressionsmerkmale: die Datei wird hier neu gepackt, das unterscheidet sich messbar von einer
-            Original-Word-Datei.
-          </li>
-          <li>Inhaltliche Spuren wie nachverfolgte Änderungen oder in Bildern eingebettete EXIF-Daten.</li>
+          <li>Zeitstempel des Dateisystems — beim Speichern immer neu gesetzt.</li>
+          <li>Versionsverlauf in OneDrive, SharePoint, Google Drive oder einem DMS.</li>
+          <li>Kopien, die bereits verschickt wurden.</li>
+          <li>Nachverfolgte Änderungen: die müssen in Word bzw. LibreOffice angenommen werden.</li>
+          <li>Eingebettete Fremddokumente (OLE) und SmartArt-Datenmodelle — dort nur Hinweis, keine Automatik.</li>
+          <li>Verschlüsselte PDFs werden bewusst abgelehnt statt beschädigt.</li>
         </ul>
         <p>
-          Für den eigentlichen Zweck — persönliche Daten vor der Weitergabe eines Dokuments entfernen — reicht das
-          hier vollständig aus. Als Nachweis gegenüber Dritten, dass ein Dokument zu einem bestimmten Zeitpunkt
-          entstanden ist, taugen manipulierte Metadaten nicht: Rückdatierung fällt in forensischen Prüfungen
-          regelmäßig auf und ist im rechtlichen Kontext strafbar.
+          Rückdatierung fällt in forensischen Prüfungen regelmäßig auf und ist im rechtlichen Kontext strafbar.
         </p>
       </section>
     </main>

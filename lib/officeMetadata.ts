@@ -357,7 +357,8 @@ function ensureRootRelationship(entries: ZipEntry[], partName: string): void {
   setText(entries, ROOT_RELS, serializeXml(doc))
 }
 
-export function stripRsidsFromPackage(entries: ZipEntry[]): void {
+export function stripRsidsFromPackage(entries: ZipEntry[]): string[] {
+  const touched: string[] = []
   for (const entry of entries) {
     if (!/^word\/.*\.xml$/.test(entry.name)) continue
     const xml = decodeText(entry.data)
@@ -366,15 +367,19 @@ export function stripRsidsFromPackage(entries: ZipEntry[]): void {
       .replace(/<w:rsid\b[^>]*\/>/g, '')
       .replace(/\s+w:rsid[A-Za-z]*="[^"]*"/g, '')
       .replace(/<w:proofState\b[^>]*\/>/g, '')
-    if (cleaned !== xml) entry.data = encodeText(cleaned)
+    if (cleaned !== xml) {
+      entry.data = encodeText(cleaned)
+      touched.push(entry.name)
+    }
   }
+  return touched
 }
 
-export function stripCommentsFromPackage(entries: ZipEntry[]): void {
-  removeParts(entries, (name) => /^word\/comments.*\.xml$/.test(name) || name === 'word/people.xml')
+export function stripCommentsFromPackage(entries: ZipEntry[]): string[] {
+  const removed = removeParts(entries, (name) => /^word\/comments.*\.xml$/.test(name) || name === 'word/people.xml')
 
   const documentEntry = findEntry(entries, 'word/document.xml')
-  if (!documentEntry) return
+  if (!documentEntry) return removed
   const xml = decodeText(documentEntry.data)
   const cleaned = xml
     .replace(/<w:commentRange(?:Start|End)\b[^>]*\/>/g, '')
@@ -382,6 +387,7 @@ export function stripCommentsFromPackage(entries: ZipEntry[]): void {
     // The run wrapping a comment reference is left behind empty; drop it too.
     .replace(/<w:r>(?:\s*<w:rPr>[\s\S]*?<\/w:rPr>)?\s*<\/w:r>/g, '')
   if (cleaned !== xml) documentEntry.data = encodeText(cleaned)
+  return removed
 }
 
 export interface BuildResult {

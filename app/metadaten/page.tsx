@@ -2,146 +2,199 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react'
 import {
-  DEFAULT_CLEANUP,
-  FIELDS,
+  DEFAULT_OPTIONS,
   SUPPORTED_EXTENSIONS,
-  buildDocument,
-  loadDocument,
-  toLocalInput,
+  buildReportText,
+  cleanFile,
+  loadFile,
   toW3CDTF,
-  type CleanupOptions,
-  type CustomProp,
-  type OfficeDoc,
-} from '@/lib/officeMetadata'
+  type CleanResult,
+  type Field,
+  type Finding,
+  type LoadedFile,
+  type Options,
+  type ReportEntry,
+} from '@/lib/clean'
+import { OPTION_GROUPS, PROFILES, profileByKey } from '@/lib/profiles'
+import { toLocalInput, type CustomProp } from '@/lib/officeMetadata'
+import { writeZip } from '@/lib/zip'
 
-const CLEANUP_LABELS: { key: keyof CleanupOptions; label: string; hint: string }[] = [
-  {
-    key: 'normalizeZipTimestamps',
-    label: 'ZIP-Zeitstempel angleichen',
-    hint: 'Setzt das Datum aller Paketteile auf „Geändert am". Ohne das verraten die internen Zeitstempel die echte Bearbeitung.',
-  },
-  {
-    key: 'stripRsids',
-    label: 'Word-RSIDs entfernen',
-    hint: 'Löscht die Sitzungs-IDs, mit denen sich Bearbeitungsrunden und verwandte Dokumente zuordnen lassen.',
-  },
-  {
-    key: 'stripThumbnail',
-    label: 'Vorschaubild entfernen',
-    hint: 'Das eingebettete Vorschaubild zeigt oft einen älteren Stand der ersten Seite.',
-  },
-  {
-    key: 'stripCustomProps',
-    label: 'Benutzerdefinierte Eigenschaften löschen',
-    hint: 'Entfernt die komplette custom.xml statt sie einzeln zu bearbeiten.',
-  },
-  {
-    key: 'stripComments',
-    label: 'Kommentare & Personenliste entfernen (Word)',
-    hint: 'Löscht comments.xml/people.xml samt Verweisen. Nachverfolgte Änderungen bleiben — die müssen in Word angenommen werden.',
-  },
-]
+interface Item {
+  file: LoadedFile
+  values: Record<string, string>
+  customProps: CustomProp[]
+  result?: CleanResult
+}
+
+const SEVERITY_STYLE: Record<Finding['severity'], string> = {
+  hoch: 'bg-red-100 text-red-800',
+  mittel: 'bg-amber-100 text-amber-900',
+  niedrig: 'bg-stone-200 text-stone-700',
+}
 
 export default function MetadatenPage() {
-  const [doc, setDoc] = useState<OfficeDoc | null>(null)
-  const [values, setValues] = useState<Record<string, string>>({})
-  const [customProps, setCustomProps] = useState<CustomProp[]>([])
-  const [cleanup, setCleanup] = useState<CleanupOptions>(DEFAULT_CLEANUP)
+  const [items, setItems] = useState<Item[]>([])
+  const [selected, setSelected] = useState(0)
+  const [profileKey, setProfileKey] = useState('standard')
+  const [options, setOptions] = useState<Options>(DEFAULT_OPTIONS)
   const [dragging, setDragging] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [status, setStatus] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [message, setMessage] = useState<{ kind: 'info' | 'error'; text: string } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const accept = useMemo(() => SUPPORTED_EXTENSIONS.join(','), [])
+  const current = items[selected]
+  const kinds = useMemo(() => Array.from(new Set(items.map((item) => item.file.kind))), [items])
 
-  const openFile = useCallback(async (file: File) => {
-    setBusy(true)
-    setError(null)
-    setStatus(null)
-    try {
-      const loaded = await loadDocument(file)
-      setDoc(loaded)
-      setValues(loaded.values)
-      setCustomProps(loaded.customProps)
-    } catch (err) {
-      setDoc(null)
-      setError(err instanceof Error ? err.message : 'Die Datei konnte nicht gelesen werden.')
-    } finally {
-      setBusy(false)
+  const addFiles = useCallback(async (files: File[]) => {
+    if (files.length === 0) return
+    setBusy(`${files.length} Datei(en) werden gelesen…`)
+    setMessage(null)
+    const loaded: Item[] = []
+    for (const file of files) {
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer())
+        const parsed = await loadFile(file.name, bytes)
+        loaded.push({ file: parsed, values: { ...parsed.values }, customProps: parsed.customProps.map((p) => ({ ...p })) })
+      } catch (err) {
+        setMessage({ kind: 'error', text: `${file.name}: ${err instanceof Error ? err.message : 'nicht lesbar'}` })
+      }
     }
+    setItems((previous) => [...previous, ...loaded])
+    setBusy(null)
   }, [])
 
-  const onDrop = useCallback(
-    (event: React.DragEvent) => {
-      event.preventDefault()
-      setDragging(false)
-      const file = event.dataTransfer.files?.[0]
-      if (file) void openFile(file)
-    },
-    [openFile]
-  )
+  /** Folders are dropped as directory entries and have to be walked. */
+  const filesFromDrop = async (transfer: DataTransfer): Promise<File[]> => {
+    const entries = Array.from(transfer.items)
+      .map((item) => (typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null))
+      .filter(Boolean) as FileSystemEntry[]
+    if (entries.length === 0) return Array.from(transfer.files)
 
-  const setValue = (key: string, value: string) => setValues((prev) => ({ ...prev, [key]: value }))
-
-  const clearAll = () => {
-    const cleared: Record<string, string> = {}
-    for (const field of FIELDS) cleared[field.key] = ''
-    setValues(cleared)
-    setCustomProps([])
-    setStatus('Alle Felder geleert. Leere Felder werden beim Speichern komplett aus der Datei entfernt.')
+    const out: File[] = []
+    const walk = async (entry: FileSystemEntry, depth: number): Promise<void> => {
+      if (entry.isFile) {
+        const file = await new Promise<File>((done, fail) => (entry as FileSystemFileEntry).file(done, fail))
+        if (SUPPORTED_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext))) out.push(file)
+        return
+      }
+      if (!entry.isDirectory || depth > 6) return
+      const reader = (entry as FileSystemDirectoryEntry).createReader()
+      for (;;) {
+        const batch = await new Promise<FileSystemEntry[]>((done, fail) => reader.readEntries(done, fail))
+        if (batch.length === 0) break
+        for (const child of batch) await walk(child, depth + 1)
+      }
+    }
+    for (const entry of entries) await walk(entry, 0)
+    return out
   }
 
-  const applyAuthorEverywhere = () => {
-    const author = values.creator?.trim()
-    if (!author) {
-      setStatus('Trage zuerst einen Autor ein.')
+  const applyProfile = (key: string) => {
+    setProfileKey(key)
+    const profile = profileByKey(key)
+    setOptions(profile.options)
+    if (profile.clearAll) {
+      setItems((previous) =>
+        previous.map((item) => ({
+          ...item,
+          values: Object.fromEntries(item.file.fields.map((field) => [field.key, ''])),
+          customProps: [],
+        }))
+      )
+      setMessage({ kind: 'info', text: 'Profil „Streng" leert zusätzlich alle Eigenschaftsfelder.' })
+    }
+  }
+
+  const setOption = (group: keyof Options, key: string, value: boolean) => {
+    setOptions((previous) => ({ ...previous, [group]: { ...previous[group], [key]: value } }))
+    setProfileKey('eigenes')
+  }
+
+  const cleanAll = async () => {
+    if (items.length === 0) return
+    setBusy('Dateien werden bereinigt…')
+    setMessage(null)
+    const done: Item[] = []
+    for (const item of items) {
+      const result = await cleanFile(item.file, item.values, item.customProps, options)
+      done.push({ ...item, result })
+    }
+    setItems(done)
+    setBusy(null)
+
+    const failed = done.filter((item) => item.result?.error).length
+    setMessage(
+      failed > 0
+        ? { kind: 'error', text: `${failed} von ${done.length} Datei(en) konnten nicht bereinigt werden — Details unten.` }
+        : { kind: 'info', text: `${done.length} Datei(en) bereinigt. Unten herunterladen.` }
+    )
+  }
+
+  const download = (bytes: Uint8Array, name: string, type = 'application/octet-stream') => {
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = name
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  }
+
+  const downloadAll = async () => {
+    const cleaned = items.filter((item) => item.result && !item.result.error)
+    if (cleaned.length === 0) return
+    if (cleaned.length === 1) {
+      download(cleaned[0].result!.bytes, cleaned[0].result!.fileName)
       return
     }
-    setValues((prev) => ({ ...prev, lastModifiedBy: author }))
+    const blob = await writeZip(
+      cleaned.map((item) => ({
+        name: item.result!.fileName,
+        data: item.result!.bytes,
+        method: 8,
+        dosTime: 0,
+        dosDate: 33,
+        externalAttr: 0,
+      }))
+    )
+    download(new Uint8Array(await blob.arrayBuffer()), 'bereinigt.zip', 'application/zip')
   }
 
-  const neutralizeCounters = () => {
-    setValues((prev) => ({ ...prev, revision: '1', TotalTime: '0', lastPrinted: '' }))
-    setStatus('Revisionsnummer auf 1, Bearbeitungszeit auf 0, Druckdatum entfernt.')
+  const reportEntries = (): ReportEntry[] =>
+    items.map((item) => ({
+      file: item.result?.fileName ?? item.file.name,
+      kind: item.file.kind,
+      sizeBefore: item.file.size,
+      sizeAfter: item.result?.bytes.length ?? item.file.size,
+      sha256Before: item.file.sha256,
+      sha256After: item.result?.sha256After ?? item.file.sha256,
+      findingsBefore: item.file.findings,
+      steps: item.result?.steps ?? [],
+      remaining: item.result?.remaining ?? item.file.findings,
+      error: item.result?.error ?? item.file.error,
+    }))
+
+  const downloadReport = () => {
+    const text = buildReportText(reportEntries(), new Date().toLocaleString('de-DE'))
+    download(new TextEncoder().encode(text), 'metadaten-protokoll.txt', 'text/plain')
   }
 
-  const download = async () => {
-    if (!doc) return
-    setBusy(true)
-    setError(null)
-    setStatus(null)
-    try {
-      const { blob } = await buildDocument(doc, values, customProps, cleanup)
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = doc.fileName
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      // Revoking straight away can cancel the download in some browsers.
-      setTimeout(() => URL.revokeObjectURL(url), 10_000)
-      setStatus(
-        'Datei gespeichert. Öffne sie einmal zur Kontrolle — und denk daran, dass der Zeitstempel deines Dateisystems jetzt „heute" ist.'
-      )
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Die Datei konnte nicht geschrieben werden.')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const setValue = (key: string, value: string) =>
+    setItems((previous) =>
+      previous.map((item, index) => (index === selected ? { ...item, values: { ...item.values, [key]: value } } : item))
+    )
 
-  const coreFields = FIELDS.filter((f) => f.part === 'core')
-  const appFields = FIELDS.filter((f) => f.part === 'app')
+  const relevantGroups = OPTION_GROUPS.filter((group) => kinds.some((kind) => group.kinds.includes(kind)))
 
   return (
     <div className="space-y-8">
       <header>
         <h1 className="text-3xl font-bold text-stone-800">Metadaten-Editor</h1>
         <p className="mt-2 text-stone-600">
-          Office-Datei hierher ziehen, Eigenschaften bearbeiten, neu speichern. Die Verarbeitung passiert
-          vollständig im Browser — es wird nichts hochgeladen.
+          Dateien oder ganze Ordner hierher ziehen. Prüfen, bereinigen, herunterladen — vollständig im Browser, es
+          wird nichts hochgeladen.
         </p>
       </header>
 
@@ -151,207 +204,232 @@ export default function MetadatenPage() {
           setDragging(true)
         }}
         onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
+        onDrop={async (e) => {
+          e.preventDefault()
+          setDragging(false)
+          await addFiles(await filesFromDrop(e.dataTransfer))
+        }}
         onClick={() => inputRef.current?.click()}
         className={`cursor-pointer rounded-lg border-2 border-dashed p-10 text-center transition-colors ${
           dragging ? 'border-amber-700 bg-amber-50' : 'border-stone-300 bg-stone-100 hover:border-amber-600'
         }`}
       >
         <p className="text-lg font-medium text-stone-700">
-          {doc ? doc.fileName : 'Datei hierher ziehen oder klicken'}
+          {items.length === 0 ? 'Dateien oder Ordner hierher ziehen' : `${items.length} Datei(en) geladen — weitere hinzufügen`}
         </p>
-        <p className="mt-1 text-sm text-stone-500">{SUPPORTED_EXTENSIONS.join('  ')}</p>
+        <p className="mt-1 text-sm text-stone-500">
+          Word, Excel, PowerPoint, OpenDocument, PDF, RTF, die alten .doc/.xls/.ppt, Bilder, MP3/MP4
+        </p>
         <input
           ref={inputRef}
           type="file"
+          multiple
           accept={accept}
           className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0]
-            if (file) void openFile(file)
+          onChange={async (e) => {
+            await addFiles(Array.from(e.target.files ?? []))
             e.target.value = ''
           }}
         />
       </div>
 
-      {error && (
-        <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>
-      )}
-      {status && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">{status}</div>
+      {busy && <div className="rounded-md border border-stone-300 bg-stone-100 px-4 py-3 text-sm text-stone-700">{busy}</div>}
+      {message && (
+        <div
+          className={`rounded-md border px-4 py-3 text-sm ${
+            message.kind === 'error' ? 'border-red-300 bg-red-50 text-red-800' : 'border-amber-300 bg-amber-50 text-amber-900'
+          }`}
+        >
+          {message.text}
+        </div>
       )}
 
-      {doc && (
+      {items.length > 0 && (
         <>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={clearAll}
-              className="rounded-md bg-stone-200 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-300"
-            >
-              Alle Felder leeren
-            </button>
-            <button
-              onClick={applyAuthorEverywhere}
-              className="rounded-md bg-stone-200 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-300"
-            >
-              Autor auch als „zuletzt geändert von"
-            </button>
-            <button
-              onClick={neutralizeCounters}
-              className="rounded-md bg-stone-200 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-300"
-            >
-              Zähler zurücksetzen
-            </button>
-            <button
-              onClick={() => {
-                const now = toW3CDTF(new Date())
-                setValues((prev) => ({ ...prev, created: now, modified: now }))
-              }}
-              className="rounded-md bg-stone-200 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-300"
-            >
-              Datum auf jetzt
-            </button>
-          </div>
-
           <section className="rounded-lg border border-stone-200 bg-white p-6">
-            <h2 className="mb-4 text-xl font-semibold text-stone-800">Dokumenteigenschaften</h2>
-            <div className="grid gap-4 md:grid-cols-2">
-              {coreFields.map((field) => (
-                <FieldInput key={field.key} field={field} value={values[field.key] ?? ''} onChange={setValue} />
+            <h2 className="mb-4 text-xl font-semibold text-stone-800">Profil</h2>
+            <div className="grid gap-3 md:grid-cols-3">
+              {PROFILES.map((profile) => (
+                <button
+                  key={profile.key}
+                  onClick={() => applyProfile(profile.key)}
+                  className={`rounded-md border p-3 text-left transition-colors ${
+                    profileKey === profile.key ? 'border-amber-700 bg-amber-50' : 'border-stone-300 hover:border-amber-600'
+                  }`}
+                >
+                  <span className="block font-medium text-stone-800">{profile.label}</span>
+                  <span className="mt-1 block text-sm text-stone-500">{profile.description}</span>
+                </button>
               ))}
             </div>
-          </section>
-
-          <section className="rounded-lg border border-stone-200 bg-white p-6">
-            <h2 className="mb-4 text-xl font-semibold text-stone-800">Erweiterte Eigenschaften</h2>
-            <div className="grid gap-4 md:grid-cols-2">
-              {appFields.map((field) => (
-                <FieldInput key={field.key} field={field} value={values[field.key] ?? ''} onChange={setValue} />
-              ))}
-            </div>
-          </section>
-
-          {customProps.length > 0 && (
-            <section className="rounded-lg border border-stone-200 bg-white p-6">
-              <h2 className="mb-4 text-xl font-semibold text-stone-800">Benutzerdefinierte Eigenschaften</h2>
-              <div className="space-y-3">
-                {customProps.map((prop, index) => (
-                  <div key={prop.name} className="flex items-end gap-3">
-                    <div className="flex-1">
-                      <label className="mb-1 block text-sm font-medium text-stone-600">
-                        {prop.name} <span className="text-stone-400">({prop.type})</span>
-                      </label>
-                      <input
-                        value={prop.value}
-                        onChange={(e) =>
-                          setCustomProps((prev) =>
-                            prev.map((p, i) => (i === index ? { ...p, value: e.target.value } : p))
-                          )
-                        }
-                        className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-600 focus:outline-none"
-                      />
-                    </div>
-                    <button
-                      onClick={() => setCustomProps((prev) => prev.filter((_, i) => i !== index))}
-                      className="rounded-md bg-stone-200 px-3 py-2 text-sm text-stone-700 hover:bg-red-100 hover:text-red-800"
-                    >
-                      Löschen
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          <section className="rounded-lg border border-stone-200 bg-white p-6">
-            <h2 className="mb-4 text-xl font-semibold text-stone-800">Zusätzliche Spuren</h2>
-            <div className="space-y-3">
-              {CLEANUP_LABELS.map(({ key, label, hint }) => (
-                <label key={key} className="flex gap-3">
-                  <input
-                    type="checkbox"
-                    checked={cleanup[key]}
-                    onChange={(e) => setCleanup((prev) => ({ ...prev, [key]: e.target.checked }))}
-                    className="mt-1 h-4 w-4 accent-amber-700"
-                  />
-                  <span>
-                    <span className="block text-sm font-medium text-stone-700">{label}</span>
-                    <span className="block text-sm text-stone-500">{hint}</span>
-                  </span>
-                </label>
-              ))}
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-stone-200 bg-white p-6">
-            <h2 className="mb-4 text-xl font-semibold text-stone-800">In dieser Datei gefunden</h2>
-            {doc.traces.length === 0 ? (
-              <p className="text-sm text-stone-500">Keine der bekannten Zusatzspuren gefunden.</p>
-            ) : (
-              <ul className="space-y-3">
-                {doc.traces.map((trace) => (
-                  <li key={trace.id} className="border-l-2 border-stone-300 pl-3">
-                    <p className="text-sm font-medium text-stone-700">
-                      {trace.label}
-                      {!trace.removable && (
-                        <span className="ml-2 rounded bg-red-100 px-2 py-0.5 text-xs text-red-800">
-                          nicht automatisch entfernbar
-                        </span>
-                      )}
-                    </p>
-                    <p className="text-sm text-stone-500">{trace.detail}</p>
-                  </li>
-                ))}
-              </ul>
+            {profileKey === 'eigenes' && (
+              <p className="mt-3 text-sm text-stone-500">Eigene Auswahl — die Schalter unten weichen von den Profilen ab.</p>
             )}
           </section>
 
-          <div className="flex items-center gap-4">
-            <button
-              onClick={download}
-              disabled={busy}
-              className="rounded-md bg-amber-800 px-6 py-3 font-medium text-white hover:bg-amber-900 disabled:opacity-50"
-            >
-              {busy ? 'Wird geschrieben…' : 'Bearbeitete Datei speichern'}
-            </button>
+          <section className="rounded-lg border border-stone-200 bg-white p-6">
+            <h2 className="mb-1 text-xl font-semibold text-stone-800">Dateien</h2>
+            <p className="mb-4 text-sm text-stone-500">Zum Bearbeiten der Eigenschaften eine Datei auswählen.</p>
+            <ul className="divide-y divide-stone-200">
+              {items.map((item, index) => {
+                const high = item.file.findings.filter((f) => f.severity === 'hoch').length
+                return (
+                  <li key={`${item.file.name}-${index}`}>
+                    <button
+                      onClick={() => setSelected(index)}
+                      className={`flex w-full items-center justify-between gap-4 px-2 py-3 text-left ${
+                        index === selected ? 'bg-amber-50' : 'hover:bg-stone-50'
+                      }`}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium text-stone-800">{item.file.name}</span>
+                        <span className="block text-sm text-stone-500">
+                          {item.file.kind} · {Math.max(1, Math.round(item.file.size / 1024))} KB ·{' '}
+                          {item.file.findings.length} Fund(e)
+                          {item.file.error ? ` · ${item.file.error}` : ''}
+                        </span>
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        {high > 0 && <span className={`rounded px-2 py-0.5 text-xs ${SEVERITY_STYLE.hoch}`}>{high}× hoch</span>}
+                        {item.result && !item.result.error && (
+                          <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800">bereinigt</span>
+                        )}
+                        {item.result?.error && <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-800">Fehler</span>}
+                      </span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
             <button
               onClick={() => {
-                setValues(doc.values)
-                setCustomProps(doc.customProps)
-                setStatus('Ursprüngliche Werte wiederhergestellt.')
+                setItems([])
+                setSelected(0)
+                setMessage(null)
               }}
-              className="text-sm text-stone-600 underline hover:text-amber-800"
+              className="mt-4 text-sm text-stone-600 underline hover:text-amber-800"
             >
-              Änderungen verwerfen
+              Liste leeren
             </button>
+          </section>
+
+          {current && current.file.fields.length > 0 && <FieldEditor item={current} onChange={setValue} />}
+
+          {current && (
+            <section className="rounded-lg border border-stone-200 bg-white p-6">
+              <h2 className="mb-4 text-xl font-semibold text-stone-800">Befund: {current.file.name}</h2>
+              {current.file.findings.length === 0 ? (
+                <p className="text-sm text-stone-500">Keine der bekannten Spuren gefunden.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {current.file.findings.map((finding, index) => (
+                    <li key={`${finding.id}-${index}`} className="border-l-2 border-stone-300 pl-3">
+                      <p className="text-sm font-medium text-stone-700">
+                        <span className={`mr-2 rounded px-2 py-0.5 text-xs ${SEVERITY_STYLE[finding.severity]}`}>
+                          {finding.severity}
+                        </span>
+                        {finding.label}
+                        {!finding.option && (
+                          <span className="ml-2 rounded bg-stone-200 px-2 py-0.5 text-xs text-stone-700">
+                            nur manuell zu beheben
+                          </span>
+                        )}
+                      </p>
+                      <p className="mt-1 text-sm text-stone-500">{finding.detail}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+
+          {relevantGroups.map((group) => (
+            <section key={group.group} className="rounded-lg border border-stone-200 bg-white p-6">
+              <h2 className="mb-4 text-xl font-semibold text-stone-800">{group.title}</h2>
+              <div className="space-y-3">
+                {group.items.map((item) => (
+                  <label key={item.key} className="flex gap-3">
+                    <input
+                      type="checkbox"
+                      checked={Boolean((options[group.group] as unknown as Record<string, boolean>)[item.key])}
+                      onChange={(e) => setOption(group.group, item.key, e.target.checked)}
+                      className="mt-1 h-4 w-4 accent-amber-700"
+                    />
+                    <span>
+                      <span className="block text-sm font-medium text-stone-700">{item.label}</span>
+                      <span className="block text-sm text-stone-500">{item.hint}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </section>
+          ))}
+
+          <div className="flex flex-wrap items-center gap-4">
+            <button
+              onClick={cleanAll}
+              disabled={Boolean(busy)}
+              className="rounded-md bg-amber-800 px-6 py-3 font-medium text-white hover:bg-amber-900 disabled:opacity-50"
+            >
+              {items.length === 1 ? 'Datei bereinigen' : `${items.length} Dateien bereinigen`}
+            </button>
+            {items.some((item) => item.result && !item.result.error) && (
+              <button
+                onClick={downloadAll}
+                className="rounded-md bg-stone-200 px-4 py-3 font-medium text-stone-700 hover:bg-stone-300"
+              >
+                {items.filter((item) => item.result && !item.result.error).length === 1
+                  ? 'Datei herunterladen'
+                  : 'Alle als ZIP herunterladen'}
+              </button>
+            )}
+            {items.some((item) => item.result) && (
+              <button onClick={downloadReport} className="text-sm text-stone-600 underline hover:text-amber-800">
+                Protokoll herunterladen
+              </button>
+            )}
           </div>
+
+          {items.some((item) => item.result) && <ResultList items={items} />}
         </>
       )}
 
       <section className="rounded-lg border border-stone-300 bg-stone-100 p-6">
         <h2 className="mb-2 text-lg font-semibold text-stone-800">Was dieses Tool nicht kann</h2>
-        <p className="mb-3 text-sm text-stone-600">
-          Bearbeitete Metadaten sind kein sauberer Zustand — sie sind ein bearbeiteter Zustand. Außerhalb der Datei
-          bleiben Spuren, an die kein Editor herankommt:
-        </p>
         <ul className="list-disc space-y-1 pl-5 text-sm text-stone-600">
-          <li>Zeitstempel des Dateisystems (Erstellt/Geändert/Zugriff) — beim Speichern immer neu gesetzt.</li>
-          <li>Versionsverlauf in OneDrive, SharePoint, Google Drive, Dropbox oder einem DMS.</li>
-          <li>Kopien, die bereits per Mail, Chat oder Backup verschickt wurden.</li>
-          <li>
-            Kompressionsmerkmale: die Datei wird hier neu gepackt, das unterscheidet sich messbar von einer
-            Original-Word-Datei.
-          </li>
-          <li>Inhaltliche Spuren wie nachverfolgte Änderungen oder in Bildern eingebettete EXIF-Daten.</li>
+          <li>Zeitstempel des Dateisystems — beim Speichern immer neu gesetzt.</li>
+          <li>Versionsverlauf in OneDrive, SharePoint, Google Drive oder einem DMS.</li>
+          <li>Kopien, die bereits verschickt wurden.</li>
+          <li>Nachverfolgte Änderungen: die müssen in Word bzw. LibreOffice angenommen werden.</li>
+          <li>Eingebettete Fremddokumente (OLE) und SmartArt-Datenmodelle — dort nur Hinweis, keine Automatik.</li>
+          <li>Verschlüsselte PDFs werden bewusst abgelehnt statt beschädigt.</li>
         </ul>
         <p className="mt-3 text-sm text-stone-600">
-          Für den eigentlichen Zweck — persönliche Daten vor der Weitergabe eines Dokuments entfernen — reicht das
-          hier vollständig aus. Als Nachweis gegenüber Dritten, dass ein Dokument zu einem bestimmten Zeitpunkt
-          entstanden ist, taugen manipulierte Metadaten nicht: Rückdatierung fällt in forensischen Prüfungen
-          regelmäßig auf und ist im rechtlichen Kontext strafbar.
+          Rückdatierung fällt in forensischen Prüfungen regelmäßig auf und ist im rechtlichen Kontext strafbar.
         </p>
       </section>
     </div>
+  )
+}
+
+function FieldEditor({ item, onChange }: { item: Item; onChange: (key: string, value: string) => void }) {
+  const groups = Array.from(new Set(item.file.fields.map((field) => field.group)))
+
+  return (
+    <>
+      {groups.map((group) => (
+        <section key={group} className="rounded-lg border border-stone-200 bg-white p-6">
+          <h2 className="mb-4 text-xl font-semibold text-stone-800">{group}</h2>
+          <div className="grid gap-4 md:grid-cols-2">
+            {item.file.fields
+              .filter((field) => field.group === group)
+              .map((field) => (
+                <FieldInput key={field.key} field={field} value={item.values[field.key] ?? ''} onChange={onChange} />
+              ))}
+          </div>
+        </section>
+      ))}
+    </>
   )
 }
 
@@ -360,34 +438,73 @@ function FieldInput({
   value,
   onChange,
 }: {
-  field: (typeof FIELDS)[number]
+  field: Field
   value: string
   onChange: (key: string, value: string) => void
 }) {
-  const common =
-    'w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-600 focus:outline-none'
+  const className = 'w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-600 focus:outline-none'
 
   return (
     <div className={field.kind === 'longtext' ? 'md:col-span-2' : undefined}>
       <label className="mb-1 block text-sm font-medium text-stone-600">{field.label}</label>
       {field.kind === 'longtext' ? (
-        <textarea rows={3} value={value} onChange={(e) => onChange(field.key, e.target.value)} className={common} />
+        <textarea rows={3} value={value} onChange={(e) => onChange(field.key, e.target.value)} className={className} />
       ) : field.kind === 'datetime' ? (
         <input
           type="datetime-local"
           value={toLocalInput(value)}
           onChange={(e) => onChange(field.key, e.target.value ? toW3CDTF(new Date(e.target.value)) : '')}
-          className={common}
+          className={className}
         />
       ) : (
         <input
           type={field.kind === 'number' ? 'number' : 'text'}
           value={value}
           onChange={(e) => onChange(field.key, e.target.value)}
-          className={common}
+          className={className}
         />
       )}
       {field.hint && <p className="mt-1 text-xs text-stone-500">{field.hint}</p>}
     </div>
+  )
+}
+
+function ResultList({ items }: { items: Item[] }) {
+  return (
+    <section className="rounded-lg border border-stone-200 bg-white p-6">
+      <h2 className="mb-4 text-xl font-semibold text-stone-800">Protokoll</h2>
+      <div className="space-y-5">
+        {items
+          .filter((item) => item.result)
+          .map((item, index) => (
+            <div key={`${item.file.name}-${index}`}>
+              <p className="font-medium text-stone-800">{item.result!.fileName}</p>
+              {item.result!.error ? (
+                <p className="mt-1 text-sm text-red-700">{item.result!.error}</p>
+              ) : (
+                <>
+                  <p className="mt-1 font-mono text-xs text-stone-500">
+                    SHA-256 vorher {item.result!.sha256Before.slice(0, 16)}… · nachher {item.result!.sha256After.slice(0, 16)}…
+                  </p>
+                  <ul className="mt-2 list-disc pl-5 text-sm text-stone-600">
+                    {item.result!.steps.map((step, i) => (
+                      <li key={i}>{step}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-sm">
+                    {item.result!.remaining.length === 0 ? (
+                      <span className="text-green-700">Nachkontrolle: keine Funde mehr.</span>
+                    ) : (
+                      <span className="text-amber-800">
+                        Nachkontrolle: {item.result!.remaining.map((f) => f.label).join(', ')}
+                      </span>
+                    )}
+                  </p>
+                </>
+              )}
+            </div>
+          ))}
+      </div>
+    </section>
   )
 }

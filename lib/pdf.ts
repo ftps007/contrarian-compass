@@ -575,7 +575,9 @@ function reachable(doc: PdfDocument, roots: PdfValue[]): Set<number> {
 function countUnreachable(doc: PdfDocument): number {
   const root = doc.trailer.get('Root')
   if (!root) return 0
-  const live = reachable(doc, [root])
+  // The Info dictionary hangs off the trailer, not off the catalogue.
+  const roots = [root, doc.trailer.get('Info')].filter(Boolean) as PdfValue[]
+  const live = reachable(doc, roots)
   let count = 0
   for (const [num] of Array.from(doc.objects.entries())) {
     if (!live.has(num)) count++

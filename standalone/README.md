@@ -8,7 +8,7 @@
 
 Legt `Metadaten-Editor.app` in `~/Applications` an, registriert sie bei Launch Services und startet
 sie gleich. Danach ist sie über Launchpad, Spotlight (cmd+Leertaste) und den App-Umschalter
-erreichbar wie jedes andere Programm — der Finder wird nicht gebraucht.
+erreichbar wie jedes andere Programm.
 
 Für alle Benutzer des Rechners stattdessen:
 
@@ -16,8 +16,8 @@ Für alle Benutzer des Rechners stattdessen:
 sudo ./standalone/build-app.sh /Applications
 ```
 
-Weil die App lokal erzeugt wird, hat sie kein Gatekeeper-Quarantäneflag und startet ohne
-Sicherheitsnachfrage. Deinstallieren heißt: App in den Papierkorb ziehen.
+Weil die App lokal erzeugt, von der Quarantäne befreit und ad-hoc signiert wird, startet sie ohne
+Gatekeeper-Nachfrage. Deinstallieren heißt: App in den Papierkorb ziehen.
 
 ## Wie sie läuft
 
@@ -29,17 +29,15 @@ Browser fällt sie auf den Standardbrowser zurück und erscheint dort als normal
 
 Weil die Anzeige ein Browser übernimmt, kann im Dock der Name bzw. das Symbol des Browsers stehen
 statt das der App — das wäre nur mit einer nativen Hülle (Electron & Co.) zu ändern, die aus
-40 KB rund 200 MB machen würde.
+170 KB rund 200 MB machen würde.
 
 Ein Dokument, das auf das App-Symbol gezogen wird, nimmt die App bewusst nicht an: ein Browser
-lässt sich von außen keine Datei in die Seite reichen. Das Ziehen passiert im geöffneten Fenster,
-irgendwo hin — das ganze Fenster ist eine Ablagefläche.
-
-Die fertige Datei landet im Download-Ordner. Falls der Fallback-Browser Safari sie in einem Tab
-anzeigt statt sie zu sichern, hilft es, Chrome zu installieren; dann greift der Fensterpfad oben.
+lässt sich von außen keine Datei in die Seite reichen. Gezogen wird ins geöffnete Fenster —
+einzelne Dateien oder ganze Ordner, die gesamte Fensterfläche ist Ablagezone.
 
 Gebraucht wird die `CompressionStream`-API: Safari 16.4+, Chrome/Edge 80+, Firefox 113+. Ältere
-Browser bekommen einen Hinweis statt einer kaputten Oberfläche.
+Browser bekommen einen Hinweis statt einer kaputten Oberfläche. Ergebnisse landen im
+Download-Ordner; mehrere Dateien kommen als ZIP.
 
 ## Ohne Installation
 
@@ -49,14 +47,14 @@ im Bundle steckt.
 ## Neu bauen
 
 ```
-npm run build:standalone     # bündelt lib/ + standalone/app.js -> Metadaten-Editor.html
-python3 standalone/make-icon.py   # nur nötig, wenn das Icon geändert wird
-./standalone/build-app.sh    # App neu bauen und installieren
+npm run build:standalone            # bündelt lib/ + standalone/app.js -> Metadaten-Editor.html
+python3 standalone/make-icon.py     # nur nötig, wenn das Icon geändert wird
+./standalone/build-app.sh           # App neu bauen und installieren
 ```
 
-`build:standalone` bündelt `standalone/app.js` samt der gemeinsam genutzten Logik aus `lib/` per
-esbuild in `standalone/template.html`. Die fertige HTML-Datei und das Icon sind eingecheckt, die
-Schritte sind also nur nach Änderungen nötig.
+Die fertige HTML-Datei und das Icon sind eingecheckt, die Schritte sind also nur nach Änderungen
+nötig. Web-Seite, App und Kommandozeile teilen sich die gesamte Logik in `lib/`; doppelt vorhanden
+ist nur die Oberfläche (React bzw. Vanilla-JS).
 
-Dieselbe Logik steckt hinter der Seite `/metadaten` der Web-App — geteilt werden `lib/zip.ts` und
-`lib/officeMetadata.ts`, doppelt vorhanden ist nur die Oberfläche (React bzw. Vanilla-JS).
+Was das Werkzeug findet, entfernt und bewusst nicht anfasst, steht in
+[`docs/metadaten-editor.md`](../docs/metadaten-editor.md).

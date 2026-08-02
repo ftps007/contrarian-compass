@@ -1,54 +1,28 @@
 /**
- * Vanilla-JS UI for the standalone (file://) build of the metadata editor.
+ * Vanilla-JS front end for the standalone (file://) build.
  *
- * The OOXML logic is shared with the web page — it is imported from lib/ and
- * bundled into a single HTML file by standalone/build.mjs, so there is no
- * second copy of the parsing and rewriting rules.
+ * Same engine as the web page — lib/clean.ts is bundled in by
+ * standalone/build.mjs — so there is no second copy of the cleaning rules,
+ * only a second presentation of them.
  */
 
 import {
-  DEFAULT_CLEANUP,
-  FIELDS,
+  DEFAULT_OPTIONS,
   SUPPORTED_EXTENSIONS,
-  buildDocument,
-  loadDocument,
-  toLocalInput,
+  buildReportText,
+  cleanFile,
+  loadFile,
   toW3CDTF,
-} from '../lib/officeMetadata'
-
-const CLEANUP_LABELS = [
-  {
-    key: 'normalizeZipTimestamps',
-    label: 'ZIP-Zeitstempel angleichen',
-    hint: 'Setzt das Datum aller Paketteile auf „Geändert am". Ohne das verraten die internen Zeitstempel die echte Bearbeitung.',
-  },
-  {
-    key: 'stripRsids',
-    label: 'Word-RSIDs entfernen',
-    hint: 'Löscht die Sitzungs-IDs, mit denen sich Bearbeitungsrunden und verwandte Dokumente zuordnen lassen.',
-  },
-  {
-    key: 'stripThumbnail',
-    label: 'Vorschaubild entfernen',
-    hint: 'Das eingebettete Vorschaubild zeigt oft einen älteren Stand der ersten Seite.',
-  },
-  {
-    key: 'stripCustomProps',
-    label: 'Benutzerdefinierte Eigenschaften löschen',
-    hint: 'Entfernt die komplette custom.xml statt sie einzeln zu bearbeiten.',
-  },
-  {
-    key: 'stripComments',
-    label: 'Kommentare & Personenliste entfernen (Word)',
-    hint: 'Löscht comments.xml/people.xml samt Verweisen. Nachverfolgte Änderungen bleiben — die müssen in Word angenommen werden.',
-  },
-]
+} from '../lib/clean'
+import { OPTION_GROUPS, PROFILES, profileByKey } from '../lib/profiles'
+import { toLocalInput } from '../lib/officeMetadata'
+import { writeZip } from '../lib/zip'
 
 const state = {
-  doc: null,
-  values: {},
-  customProps: [],
-  cleanup: { ...DEFAULT_CLEANUP },
+  items: [],
+  selected: 0,
+  profile: 'standard',
+  options: DEFAULT_OPTIONS,
 }
 
 const $ = (id) => document.getElementById(id)
@@ -59,7 +33,7 @@ function el(tag, props = {}, children = []) {
     if (key === 'class') node.className = value
     else if (key === 'text') node.textContent = value
     else if (key.startsWith('on')) node.addEventListener(key.slice(2), value)
-    else node.setAttribute(key, value)
+    else if (value !== undefined && value !== null) node.setAttribute(key, value)
   }
   for (const child of children) node.appendChild(child)
   return node
@@ -75,79 +49,166 @@ function setMessage(kind, text) {
 // Loading
 // ---------------------------------------------------------------------------
 
-async function openFile(file) {
-  setMessage('info', 'Datei wird gelesen…')
-  try {
-    const doc = await loadDocument(file)
-    state.doc = doc
-    state.values = { ...doc.values }
-    state.customProps = doc.customProps.map((p) => ({ ...p }))
-    state.cleanup = { ...DEFAULT_CLEANUP }
-    $('dropzone-name').textContent = doc.fileName
-    render()
-    setMessage(null, null)
-  } catch (err) {
-    state.doc = null
-    $('editor').classList.add('hidden')
-    setMessage('error', err instanceof Error ? err.message : 'Die Datei konnte nicht gelesen werden.')
+async function addFiles(files) {
+  if (files.length === 0) return
+  setMessage('info', `${files.length} Datei(en) werden gelesen…`)
+  for (const file of files) {
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      const parsed = await loadFile(file.name, bytes)
+      state.items.push({
+        file: parsed,
+        values: { ...parsed.values },
+        customProps: parsed.customProps.map((p) => ({ ...p })),
+        result: null,
+      })
+    } catch (err) {
+      setMessage('error', `${file.name}: ${err instanceof Error ? err.message : 'nicht lesbar'}`)
+      render()
+      return
+    }
   }
+  setMessage(null, null)
+  render()
+}
+
+/** Dropped folders arrive as directory entries and have to be walked. */
+async function filesFromDrop(transfer) {
+  const entries = Array.from(transfer.items || [])
+    .map((item) => (typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null))
+    .filter(Boolean)
+  if (entries.length === 0) return Array.from(transfer.files || [])
+
+  const out = []
+  const walk = async (entry, depth) => {
+    if (entry.isFile) {
+      const file = await new Promise((done, fail) => entry.file(done, fail))
+      if (SUPPORTED_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext))) out.push(file)
+      return
+    }
+    if (!entry.isDirectory || depth > 6) return
+    const reader = entry.createReader()
+    for (;;) {
+      const batch = await new Promise((done, fail) => reader.readEntries(done, fail))
+      if (batch.length === 0) break
+      for (const child of batch) await walk(child, depth + 1)
+    }
+  }
+  for (const entry of entries) await walk(entry, 0)
+  return out
 }
 
 function wireDropzone() {
   const zone = $('dropzone')
   const input = $('file-input')
   input.setAttribute('accept', SUPPORTED_EXTENSIONS.join(','))
-  $('dropzone-formats').textContent = SUPPORTED_EXTENSIONS.join('  ')
+  $('dropzone-formats').textContent =
+    'Word, Excel, PowerPoint, OpenDocument, PDF, RTF, die alten .doc/.xls/.ppt, Bilder, MP3/MP4'
 
   zone.addEventListener('click', () => input.click())
-  zone.addEventListener('dragover', (e) => {
-    e.preventDefault()
-    zone.classList.add('dragging')
-  })
-  zone.addEventListener('dragleave', () => zone.classList.remove('dragging'))
-  zone.addEventListener('drop', (e) => {
-    e.preventDefault()
-    zone.classList.remove('dragging')
-    const file = e.dataTransfer.files?.[0]
-    if (file) void openFile(file)
-  })
-  input.addEventListener('change', (e) => {
-    const file = e.target.files?.[0]
-    if (file) void openFile(file)
+  input.addEventListener('change', async (e) => {
+    await addFiles(Array.from(e.target.files || []))
     e.target.value = ''
   })
 
-  // Dropping anywhere on the window works too — the zone is just the hint.
-  document.addEventListener('dragover', (e) => e.preventDefault())
-  document.addEventListener('drop', (e) => {
+  const stop = (e) => {
     e.preventDefault()
-    const file = e.dataTransfer?.files?.[0]
-    if (file) void openFile(file)
-  })
+    e.stopPropagation()
+  }
+  for (const target of [zone, document]) {
+    target.addEventListener('dragover', (e) => {
+      stop(e)
+      zone.classList.add('dragging')
+    })
+    target.addEventListener('dragleave', () => zone.classList.remove('dragging'))
+    target.addEventListener('drop', async (e) => {
+      stop(e)
+      zone.classList.remove('dragging')
+      await addFiles(await filesFromDrop(e.dataTransfer))
+    })
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
 
-function fieldRow(field) {
-  const value = state.values[field.key] ?? ''
+function renderProfiles() {
+  $('profiles').replaceChildren(
+    ...PROFILES.map((profile) =>
+      el('button', {
+        class: `profile ${state.profile === profile.key ? 'active' : ''}`,
+        onclick: () => applyProfile(profile.key),
+      }, [
+        el('span', { class: 'profile-label', text: profile.label }),
+        el('span', { class: 'hint', text: profile.description }),
+      ])
+    )
+  )
+}
+
+function applyProfile(key) {
+  state.profile = key
+  const profile = profileByKey(key)
+  state.options = profile.options
+  if (profile.clearAll) {
+    for (const item of state.items) {
+      item.values = Object.fromEntries(item.file.fields.map((field) => [field.key, '']))
+      item.customProps = []
+    }
+    setMessage('info', 'Profil „Streng" leert zusätzlich alle Eigenschaftsfelder.')
+  }
+  render()
+}
+
+function renderFileList() {
+  const container = $('file-list')
+  container.replaceChildren(
+    ...state.items.map((item, index) => {
+      const high = item.file.findings.filter((f) => f.severity === 'hoch').length
+      const badges = []
+      if (high > 0) badges.push(el('span', { class: 'badge hoch', text: `${high}× hoch` }))
+      if (item.result && !item.result.error) badges.push(el('span', { class: 'badge ok', text: 'bereinigt' }))
+      if (item.result?.error) badges.push(el('span', { class: 'badge hoch', text: 'Fehler' }))
+
+      return el('button', {
+        class: `file-row ${index === state.selected ? 'active' : ''}`,
+        onclick: () => {
+          state.selected = index
+          render()
+        },
+      }, [
+        el('span', { class: 'file-main' }, [
+          el('span', { class: 'file-name', text: item.file.name }),
+          el('span', {
+            class: 'hint',
+            text: `${item.file.kind} · ${Math.max(1, Math.round(item.file.size / 1024))} KB · ${item.file.findings.length} Fund(e)${item.file.error ? ` · ${item.file.error}` : ''}`,
+          }),
+        ]),
+        el('span', { class: 'badges' }, badges),
+      ])
+    })
+  )
+}
+
+function fieldRow(field, item) {
+  const value = item.values[field.key] ?? ''
   let input
 
   if (field.kind === 'longtext') {
     input = el('textarea', { rows: '3' })
     input.value = value
-    input.addEventListener('input', () => (state.values[field.key] = input.value))
+    input.addEventListener('input', () => (item.values[field.key] = input.value))
   } else if (field.kind === 'datetime') {
     input = el('input', { type: 'datetime-local' })
     input.value = toLocalInput(value)
     input.addEventListener('input', () => {
-      state.values[field.key] = input.value ? toW3CDTF(new Date(input.value)) : ''
+      item.values[field.key] = input.value ? toW3CDTF(new Date(input.value)) : ''
     })
   } else {
     input = el('input', { type: field.kind === 'number' ? 'number' : 'text' })
     input.value = value
-    input.addEventListener('input', () => (state.values[field.key] = input.value))
+    input.addEventListener('input', () => (item.values[field.key] = input.value))
   }
 
   input.id = `field-${field.key}`
@@ -156,145 +217,229 @@ function fieldRow(field) {
   return el('div', { class: field.kind === 'longtext' ? 'field wide' : 'field' }, children)
 }
 
-function renderFields(containerId, part) {
-  const container = $(containerId)
-  container.replaceChildren(...FIELDS.filter((f) => f.part === part).map(fieldRow))
+function renderFields() {
+  const container = $('fields')
+  const item = state.items[state.selected]
+  container.replaceChildren()
+  if (!item || item.file.fields.length === 0) return
+
+  const groups = Array.from(new Set(item.file.fields.map((field) => field.group)))
+  for (const group of groups) {
+    container.appendChild(
+      el('section', {}, [
+        el('h2', { text: group }),
+        el(
+          'div',
+          { class: 'grid' },
+          item.file.fields.filter((field) => field.group === group).map((field) => fieldRow(field, item))
+        ),
+      ])
+    )
+  }
 }
 
-function renderCustomProps() {
-  const section = $('custom-section')
-  const container = $('custom-props')
-  if (state.customProps.length === 0) {
+function renderFindings() {
+  const item = state.items[state.selected]
+  const section = $('findings-section')
+  if (!item) {
+    section.classList.add('hidden')
+    return
+  }
+  section.classList.remove('hidden')
+  $('findings-title').textContent = `Befund: ${item.file.name}`
+
+  const list = $('findings')
+  if (item.file.findings.length === 0) {
+    list.replaceChildren(el('p', { class: 'hint', text: 'Keine der bekannten Spuren gefunden.' }))
+    return
+  }
+  list.replaceChildren(
+    ...item.file.findings.map((finding) => {
+      const heading = el('p', { class: 'finding-label' }, [
+        el('span', { class: `badge ${finding.severity}`, text: finding.severity }),
+        el('span', { text: ` ${finding.label}` }),
+      ])
+      if (!finding.option) heading.appendChild(el('span', { class: 'badge', text: 'nur manuell zu beheben' }))
+      return el('li', {}, [heading, el('p', { class: 'hint', text: finding.detail })])
+    })
+  )
+}
+
+function renderOptions() {
+  const kinds = Array.from(new Set(state.items.map((item) => item.file.kind)))
+  const container = $('options')
+  container.replaceChildren(
+    ...OPTION_GROUPS.filter((group) => kinds.some((kind) => group.kinds.includes(kind))).map((group) =>
+      el('section', {}, [
+        el('h2', { text: group.title }),
+        el(
+          'div',
+          {},
+          group.items.map((option) => {
+            const box = el('input', { type: 'checkbox', id: `option-${group.group}-${option.key}` })
+            box.checked = Boolean(state.options[group.group][option.key])
+            box.addEventListener('change', () => {
+              state.options = {
+                ...state.options,
+                [group.group]: { ...state.options[group.group], [option.key]: box.checked },
+              }
+              state.profile = 'eigenes'
+              renderProfiles()
+            })
+            return el('label', { class: 'check' }, [
+              box,
+              el('span', {}, [
+                el('span', { class: 'check-label', text: option.label }),
+                el('span', { class: 'hint', text: option.hint }),
+              ]),
+            ])
+          })
+        ),
+      ])
+    )
+  )
+}
+
+function renderResults() {
+  const section = $('results-section')
+  const done = state.items.filter((item) => item.result)
+  if (done.length === 0) {
     section.classList.add('hidden')
     return
   }
   section.classList.remove('hidden')
 
-  container.replaceChildren(
-    ...state.customProps.map((prop, index) => {
-      const input = el('input', { type: 'text' })
-      input.value = prop.value
-      input.addEventListener('input', () => (state.customProps[index].value = input.value))
-      return el('div', { class: 'custom-row' }, [
-        el('div', { class: 'field' }, [el('label', { text: `${prop.name} (${prop.type})` }), input]),
-        el('button', {
-          class: 'ghost danger',
-          text: 'Löschen',
-          onclick: () => {
-            state.customProps.splice(index, 1)
-            renderCustomProps()
-          },
-        }),
-      ])
-    })
-  )
-}
-
-function renderCleanup() {
-  const container = $('cleanup')
-  container.replaceChildren(
-    ...CLEANUP_LABELS.map(({ key, label, hint }) => {
-      const box = el('input', { type: 'checkbox', id: `cleanup-${key}` })
-      box.checked = state.cleanup[key]
-      box.addEventListener('change', () => (state.cleanup[key] = box.checked))
-      return el('label', { class: 'check' }, [
-        box,
-        el('span', {}, [el('span', { class: 'check-label', text: label }), el('span', { class: 'hint', text: hint })]),
-      ])
-    })
-  )
-}
-
-function renderTraces() {
-  const container = $('traces')
-  if (!state.doc || state.doc.traces.length === 0) {
-    container.replaceChildren(el('p', { class: 'hint', text: 'Keine der bekannten Zusatzspuren gefunden.' }))
-    return
-  }
-  container.replaceChildren(
-    ...state.doc.traces.map((trace) => {
-      const heading = el('p', { class: 'trace-label', text: trace.label })
-      if (!trace.removable) heading.appendChild(el('span', { class: 'badge', text: 'nicht automatisch entfernbar' }))
-      return el('li', {}, [heading, el('p', { class: 'hint', text: trace.detail })])
+  $('results').replaceChildren(
+    ...done.map((item) => {
+      const children = [el('p', { class: 'file-name', text: item.result.fileName })]
+      if (item.result.error) {
+        children.push(el('p', { class: 'error-text', text: item.result.error }))
+      } else {
+        children.push(
+          el('p', {
+            class: 'hash',
+            text: `SHA-256 vorher ${item.result.sha256Before.slice(0, 16)}… · nachher ${item.result.sha256After.slice(0, 16)}…`,
+          }),
+          el('ul', {}, item.result.steps.map((step) => el('li', { text: step }))),
+          el('p', {
+            class: item.result.remaining.length === 0 ? 'ok-text' : 'warn-text',
+            text:
+              item.result.remaining.length === 0
+                ? 'Nachkontrolle: keine Funde mehr.'
+                : `Nachkontrolle: ${item.result.remaining.map((f) => f.label).join(', ')}`,
+          })
+        )
+      }
+      return el('div', { class: 'result' }, children)
     })
   )
 }
 
 function render() {
-  $('editor').classList.remove('hidden')
-  renderFields('core-fields', 'core')
-  renderFields('app-fields', 'app')
-  renderCustomProps()
-  renderCleanup()
-  renderTraces()
+  const hasFiles = state.items.length > 0
+  $('editor').classList.toggle('hidden', !hasFiles)
+  $('dropzone-name').textContent = hasFiles
+    ? `${state.items.length} Datei(en) geladen — weitere hinzufügen`
+    : 'Dateien oder Ordner hierher ziehen'
+  if (!hasFiles) {
+    $('results-section').classList.add('hidden')
+    return
+  }
+  if (state.selected >= state.items.length) state.selected = 0
+
+  renderProfiles()
+  renderFileList()
+  renderFields()
+  renderFindings()
+  renderOptions()
+  renderResults()
+
+  const cleaned = state.items.filter((item) => item.result && !item.result.error)
+  $('clean').textContent = state.items.length === 1 ? 'Datei bereinigen' : `${state.items.length} Dateien bereinigen`
+  $('download').classList.toggle('hidden', cleaned.length === 0)
+  $('download').textContent = cleaned.length === 1 ? 'Datei herunterladen' : 'Alle als ZIP herunterladen'
+  $('report').classList.toggle('hidden', state.items.every((item) => !item.result))
 }
 
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
 
+function download(bytes, name, type = 'application/octet-stream') {
+  const url = URL.createObjectURL(new Blob([bytes], { type }))
+  const link = el('a', { href: url, download: name })
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}
+
 function wireActions() {
-  $('clear-all').addEventListener('click', () => {
-    for (const field of FIELDS) state.values[field.key] = ''
-    state.customProps = []
-    render()
-    setMessage('info', 'Alle Felder geleert. Leere Felder werden beim Speichern komplett aus der Datei entfernt.')
-  })
-
-  $('same-author').addEventListener('click', () => {
-    const author = (state.values.creator ?? '').trim()
-    if (!author) {
-      setMessage('info', 'Trage zuerst einen Autor ein.')
-      return
-    }
-    state.values.lastModifiedBy = author
-    render()
-  })
-
-  $('reset-counters').addEventListener('click', () => {
-    state.values.revision = '1'
-    state.values.TotalTime = '0'
-    state.values.lastPrinted = ''
-    render()
-    setMessage('info', 'Revisionsnummer auf 1, Bearbeitungszeit auf 0, Druckdatum entfernt.')
-  })
-
-  $('now').addEventListener('click', () => {
-    const now = toW3CDTF(new Date())
-    state.values.created = now
-    state.values.modified = now
-    render()
-  })
-
-  $('revert').addEventListener('click', () => {
-    if (!state.doc) return
-    state.values = { ...state.doc.values }
-    state.customProps = state.doc.customProps.map((p) => ({ ...p }))
-    render()
-    setMessage('info', 'Ursprüngliche Werte wiederhergestellt.')
-  })
-
-  $('save').addEventListener('click', async () => {
-    if (!state.doc) return
-    const button = $('save')
+  $('clean').addEventListener('click', async () => {
+    const button = $('clean')
     button.disabled = true
+    setMessage('info', 'Dateien werden bereinigt…')
     try {
-      const { blob } = await buildDocument(state.doc, state.values, state.customProps, state.cleanup)
-      const url = URL.createObjectURL(blob)
-      const link = el('a', { href: url, download: state.doc.fileName })
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 10_000)
+      for (const item of state.items) {
+        item.result = await cleanFile(item.file, item.values, item.customProps, state.options)
+      }
+      const failed = state.items.filter((item) => item.result?.error).length
       setMessage(
-        'info',
-        'Datei im Download-Ordner gespeichert. Öffne sie einmal zur Kontrolle — und denk daran, dass der Zeitstempel deines Dateisystems jetzt „heute" ist.'
+        failed > 0 ? 'error' : 'info',
+        failed > 0
+          ? `${failed} von ${state.items.length} Datei(en) konnten nicht bereinigt werden — Details unten.`
+          : `${state.items.length} Datei(en) bereinigt. Unten herunterladen.`
       )
     } catch (err) {
-      setMessage('error', err instanceof Error ? err.message : 'Die Datei konnte nicht geschrieben werden.')
+      setMessage('error', err instanceof Error ? err.message : 'Die Bereinigung ist fehlgeschlagen.')
     } finally {
       button.disabled = false
+      render()
     }
+  })
+
+  $('download').addEventListener('click', async () => {
+    const cleaned = state.items.filter((item) => item.result && !item.result.error)
+    if (cleaned.length === 0) return
+    if (cleaned.length === 1) {
+      download(cleaned[0].result.bytes, cleaned[0].result.fileName)
+      return
+    }
+    const blob = await writeZip(
+      cleaned.map((item) => ({
+        name: item.result.fileName,
+        data: item.result.bytes,
+        method: 8,
+        dosTime: 0,
+        dosDate: 33,
+        externalAttr: 0,
+      }))
+    )
+    download(new Uint8Array(await blob.arrayBuffer()), 'bereinigt.zip', 'application/zip')
+  })
+
+  $('report').addEventListener('click', () => {
+    const entries = state.items.map((item) => ({
+      file: item.result?.fileName ?? item.file.name,
+      kind: item.file.kind,
+      sizeBefore: item.file.size,
+      sizeAfter: item.result?.bytes.length ?? item.file.size,
+      sha256Before: item.file.sha256,
+      sha256After: item.result?.sha256After ?? item.file.sha256,
+      findingsBefore: item.file.findings,
+      steps: item.result?.steps ?? [],
+      remaining: item.result?.remaining ?? item.file.findings,
+      error: item.result?.error ?? item.file.error,
+    }))
+    const text = buildReportText(entries, new Date().toLocaleString('de-DE'))
+    download(new TextEncoder().encode(text), 'metadaten-protokoll.txt', 'text/plain')
+  })
+
+  $('clear').addEventListener('click', () => {
+    state.items = []
+    state.selected = 0
+    setMessage(null, null)
+    render()
   })
 }
 
@@ -303,4 +448,5 @@ if (typeof CompressionStream === 'undefined') {
 } else {
   wireDropzone()
   wireActions()
+  render()
 }

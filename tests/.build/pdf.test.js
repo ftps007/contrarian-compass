@@ -430,7 +430,8 @@ function reachable(doc, roots) {
 function countUnreachable(doc) {
   const root = doc.trailer.get("Root");
   if (!root) return 0;
-  const live = reachable(doc, [root]);
+  const roots = [root, doc.trailer.get("Info")].filter(Boolean);
+  const live = reachable(doc, roots);
   let count = 0;
   for (const [num] of Array.from(doc.objects.entries())) {
     if (!live.has(num)) count++;
