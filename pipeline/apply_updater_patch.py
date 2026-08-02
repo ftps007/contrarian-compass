@@ -52,7 +52,29 @@ import shutil
 import sys
 from pathlib import Path
 
+# ORDER MATTERS. Edits are applied top to bottom and later ones may match text
+# that an earlier one produced — the rate-limit handler below patches the
+# `except` block *after* the savepoint rollback has been inserted into it, so
+# it has to come last. Putting it first silently does nothing: its anchor does
+# not exist yet, and the script correctly reports "source does not match".
 EDITS: list[tuple[str, str, str, str]] = [
+
+    ("fundamentals: stop when the provider starts rate-limiting",
+     "consecutive_rate_limited",
+     '''    today = date.today()
+    fetched, errors = 0, 0
+    n = len(stock_ids)''',
+     '''    today = date.today()
+    fetched, errors = 0, 0
+    # Once Yahoo starts returning YFRateLimitError it returns it for
+    # everything, and continuing makes the limit worse rather than waiting it
+    # out. The 2026-08-02 run pushed on through 753 doomed requests over 12
+    # minutes with `fetched` frozen at 1,765 — every one of them counted
+    # against the quota that was already exhausted. Stop after a run of them
+    # and report where to resume.
+    consecutive_rate_limited = 0
+    RATE_LIMIT_GIVE_UP = 25
+    n = len(stock_ids)'''),
 
     ("_f: reject infinities after conversion, not before",
      "the guard has to run on the RESULT",
@@ -114,6 +136,37 @@ EDITS: list[tuple[str, str, str, str]] = [
             except Exception:
                 pass          # savepoint never opened (fetch failed earlier)
             errors += 1
+            if errors < 10:
+                print(f"    [error] {ticker}: {type(e).__name__}: {e}")'''),
+
+    ("fundamentals: count consecutive rate limits and bail",
+     "rate-limited; stopping",
+     '''        except Exception as e:
+            try:
+                cur.execute("ROLLBACK TO SAVEPOINT fund_row")
+            except Exception:
+                pass          # savepoint never opened (fetch failed earlier)
+            errors += 1
+            if errors < 10:
+                print(f"    [error] {ticker}: {type(e).__name__}: {e}")''',
+     '''        except Exception as e:
+            try:
+                cur.execute("ROLLBACK TO SAVEPOINT fund_row")
+            except Exception:
+                pass          # savepoint never opened (fetch failed earlier)
+            errors += 1
+            if "RateLimit" in type(e).__name__ or "Too Many Requests" in str(e):
+                consecutive_rate_limited += 1
+                if consecutive_rate_limited >= RATE_LIMIT_GIVE_UP:
+                    conn.commit()
+                    print(f"\\n  {consecutive_rate_limited} consecutive "
+                          f"tickers rate-limited; stopping at {i+1}/{n}.")
+                    print(f"  {fetched} snapshots written and committed. "
+                          f"Wait an hour, then re-run — tickers already "
+                          f"snapshotted today are skipped by ON CONFLICT.")
+                    return
+            else:
+                consecutive_rate_limited = 0
             if errors < 10:
                 print(f"    [error] {ticker}: {type(e).__name__}: {e}")'''),
 ]

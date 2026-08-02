@@ -64,6 +64,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
@@ -101,7 +102,17 @@ def candidate_urls(etf: str) -> list[tuple[str, str, dict]]:
     base = f"https://www.ishares.com/us/products/{pid}/{slug}"
     blk = f"https://www.blackrock.com/us/individual/products/{pid}/fund"
     q = f"fileType=csv&fileName={fname}&dataType=fund"
+    # The CSV endpoint answers every variant with the 1.4 MB product page, so
+    # it is gated on something a script cannot supply. The page itself has to
+    # render holdings from somewhere, and it does: the same .ajax handler with
+    # fileType=json is what the browser calls. That one is worth trying before
+    # concluding the data is unreachable.
+    jq = "fileType=json&tab=all&itemCount=10000"
+    ajson = {**ref, "X-Requested-With": "XMLHttpRequest",
+             "Accept": "application/json,text/javascript,*/*;q=0.01"}
     return [
+        ("ishares json",          f"{base}/1467271812596.ajax?{jq}", ajson),
+        ("blackrock json",        f"{blk}/1467271812596.ajax?{jq}", ajson),
         ("ishares + referer",     f"{base}/1467271812596.ajax?{q}", ref),
         ("ishares, no referer",   f"{base}/1467271812596.ajax?{q}", {}),
         ("ishares alt component", f"{base}/1521942788811.ajax?{q}", ref),
@@ -143,6 +154,47 @@ def find_header_row(lines: list[str]) -> int | None:
     return None
 
 
+def parse_json(raw: bytes) -> pd.DataFrame:
+    """iShares' own AJAX payload: {"aaData": [[ticker, name, class, ...], ...]}.
+
+    Each cell is either a scalar or a {"display": ..., "raw": ...} pair, and
+    the ticker cell is sometimes a two-element list. Only column 0 (ticker) and
+    the first string that looks like an asset class matter here.
+    """
+    import json as _json
+    doc = _json.loads(raw.decode("utf-8-sig", errors="replace"))
+    rows = doc.get("aaData") or doc.get("data") or []
+    if not rows:
+        raise ValueError("JSON has no aaData rows")
+
+    def cell(v):
+        if isinstance(v, dict):
+            return v.get("display", v.get("raw", ""))
+        if isinstance(v, list) and v:
+            return cell(v[0])
+        return v
+
+    out = []
+    for r in rows:
+        if not isinstance(r, (list, tuple)) or not r:
+            continue
+        vals = [cell(x) for x in r]
+        # Look for whatever asset-class string is present, not just "equity".
+        # Defaulting a cash line to "Equity" because it does not say "equity"
+        # is how XTSLA (the BlackRock cash sweep) survives the filter and ends
+        # up in the universe as if it were a stock.
+        asset = next((str(v) for v in vals[1:8]
+                      if isinstance(v, str)
+                      and any(w in v.lower() for w in
+                              ("equity", "cash", "derivative", "fixed income",
+                               "money market", "futures", "currency"))), "")
+        out.append({"Ticker": str(vals[0]).strip(),
+                    "Asset Class": asset or "Equity"})
+    if not out:
+        raise ValueError("JSON rows present but no ticker column")
+    return pd.DataFrame(out)
+
+
 def parse_csv(raw: bytes) -> pd.DataFrame:
     text = raw.decode("utf-8-sig", errors="replace")
     lines = text.splitlines()
@@ -172,7 +224,8 @@ def fetch_holdings(etf: str, *, verbose: bool = False) -> pd.DataFrame:
             problems.append(f"{label}: HTML instead of CSV ({len(raw):,} bytes)")
             continue
         try:
-            df = parse_csv(raw)
+            df = (parse_json(raw) if raw.lstrip()[:1] in (b"{", b"[")
+                  else parse_csv(raw))
         except Exception as e:                             # noqa: BLE001
             problems.append(f"{label}: {type(e).__name__}: {e}")
             continue
@@ -259,6 +312,40 @@ def cached_table_strict(name: str, fetch_fn, cache_dir: str,
 # CLI
 # ──────────────────────────────────────────────────────────────────────────────
 
+CACHE_NAME = {"IWB": "russell1000", "IWM": "russell2000", "IWV": "russell3000"}
+
+
+def import_csv(path: str, etf: str, cache_dir: str) -> int:
+    """Seed the screener cache from a manually downloaded holdings file.
+
+    The endpoint is bot-blocked, but the same file downloads fine from a
+    browser. This parses it with exactly the logic a live fetch would use, so
+    a hand-placed cache entry is indistinguishable from a fetched one -- no
+    second format to keep in step, and no chance of a manual import quietly
+    carrying cash rows or unnormalised tickers into the universe.
+    """
+    import os
+    raw = Path(path).read_bytes()
+    if looks_like_html(raw):
+        raise SystemExit(f"{path} is HTML, not a holdings file — save the CSV "
+                         f"the browser downloads, not the page")
+    df = parse_json(raw) if raw.lstrip()[:1] in (b"{", b"[") else parse_csv(raw)
+    tickers = extract_tickers(df)
+    name = CACHE_NAME.get(etf.upper())
+    if not name:
+        raise SystemExit(f"no cache name for {etf}; known: "
+                         f"{', '.join(CACHE_NAME)}")
+    os.makedirs(cache_dir, exist_ok=True)
+    out = os.path.join(cache_dir, f"{name}.csv")
+    df.to_csv(out, index=False)
+    print(f"  {etf.upper()}: {len(tickers):,} equity tickers → {out}")
+    print(f"  first: {', '.join(tickers[:8])} ...")
+    print("\n  The cache TTL is 7 days and the staleness ceiling 45, so this "
+          "buys\n  six weeks. Re-import before then, or find a reachable "
+          "source.")
+    return 0
+
+
 def diagnose(etfs: Iterable[str]) -> int:
     worked = 0
     for etf in etfs:
@@ -278,7 +365,8 @@ def diagnose(etfs: Iterable[str]) -> int:
                 note = "endpoint served the web page, not the file"
             else:
                 try:
-                    df = parse_csv(raw)
+                    df = (parse_json(raw) if raw.lstrip()[:1] in (b"{", b"[")
+                          else parse_csv(raw))
                     tickers = extract_tickers(df)
                     verdict = f"OK — {len(df):,} rows, {len(tickers):,} tickers"
                     note = "<<< USE THIS ONE"
@@ -309,7 +397,18 @@ def main(argv=None) -> int:
                    help="fetch one ETF and print the ticker count")
     p.add_argument("--etf", action="append", default=[],
                    help="limit --diagnose to these ETFs (repeatable)")
+    p.add_argument("--import-csv", metavar="FILE",
+                   help="seed the cache from a manually downloaded holdings "
+                        "file (needs --for)")
+    p.add_argument("--for", dest="for_etf", metavar="ETF",
+                   help="which ETF --import-csv belongs to (IWB/IWM/IWV)")
+    p.add_argument("--cache-dir", default=".screener_cache")
     args = p.parse_args(argv)
+
+    if args.import_csv:
+        if not args.for_etf:
+            p.error("--import-csv needs --for IWB|IWM|IWV")
+        return import_csv(args.import_csv, args.for_etf, args.cache_dir)
 
     etfs = [e.upper() for e in args.etf] or ["IWB", "IWM", "IWV"]
     if args.fetch:
