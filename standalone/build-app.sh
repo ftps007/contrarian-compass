@@ -6,6 +6,7 @@
 #   ./standalone/build-app.sh              -> ~/Applications (shows up in Launchpad)
 #   ./standalone/build-app.sh --open       -> install and start it right away
 #   ./standalone/build-app.sh --fenster    -> own window via Chrome instead of a browser tab
+#   ./standalone/build-app.sh --ohne-start -> install without the launch self-test
 #   ./standalone/build-app.sh /Applications
 #
 set -euo pipefail
@@ -16,11 +17,28 @@ ICON="$HERE/icon.icns"
 
 OPEN_AFTER=false
 APP_WINDOW=false
+SELFTEST=true
+
+# Under sudo the app must still be started as the logged-in user: a GUI app has
+# no business running as root, and its log belongs in that user's home.
+TARGET_USER="${SUDO_USER:-$(id -un)}"
+if [ "$(id -u)" = "0" ] && [ -n "${SUDO_USER:-}" ]; then
+  RUN_AS_USER=(sudo -u "$TARGET_USER")
+else
+  RUN_AS_USER=()
+fi
+if [ "${#RUN_AS_USER[@]}" -gt 0 ]; then
+  USER_HOME="$(eval echo "~$TARGET_USER" 2>/dev/null || true)"
+else
+  USER_HOME="$HOME"
+fi
+if [ ! -d "$USER_HOME" ]; then USER_HOME="$HOME"; fi
 TARGET_DIR=""
 for arg in "$@"; do
   case "$arg" in
-    --open) OPEN_AFTER=true ;;
+    --open) OPEN_AFTER=true ;;   # the self-test starts the app anyway
     --fenster|--window) APP_WINDOW=true ;;
+    --ohne-start) SELFTEST=false ;;
     *) TARGET_DIR="$arg" ;;
   esac
 done
@@ -65,18 +83,36 @@ cat > "$APP/Contents/MacOS/metadaten-editor" <<'LAUNCHER'
 #!/bin/bash
 # Hands the bundled page to the default browser. This is the dependable route:
 # every browser opens a local file this way.
-RESOURCES="$(cd "$(dirname "${BASH_SOURCE[0]}")/../Resources" && pwd)"
+#
+# Launched from Launchpad the environment is bare — no user PATH, no working
+# directory — so everything here uses absolute paths and resolves its own
+# location from $0. Every run leaves a line in the log, which is what the
+# installer's self-test reads.
+SELF="${BASH_SOURCE[0]:-$0}"
+RESOURCES="$(cd "$(dirname "$SELF")/../Resources" && pwd)"
 PAGE="$RESOURCES/Metadaten-Editor.html"
+LOG="$HOME/Library/Logs/Metadaten-Editor.log"
+
+mkdir -p "$(dirname "$LOG")" 2>/dev/null
+note() { echo "$(/bin/date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG" 2>/dev/null; }
+alert() { /usr/bin/osascript -e "display alert \"Metadaten-Editor\" message \"$1\"" >/dev/null 2>&1; }
+
+note "Start (Seite: $PAGE)"
 
 if [ ! -f "$PAGE" ]; then
-  osascript -e 'display alert "Metadaten-Editor" message "Die Seite fehlt im Programmpaket. Bitte build-app.sh erneut ausführen."' >/dev/null 2>&1
+  note "FEHLER: Seite fehlt im Programmpaket"
+  alert "Die Seite fehlt im Programmpaket. Bitte build-app.sh erneut ausführen."
   exit 1
 fi
 
-if ! open "$PAGE"; then
-  osascript -e "display alert \"Metadaten-Editor\" message \"Die Seite konnte nicht geöffnet werden: $PAGE\"" >/dev/null 2>&1
-  exit 1
+if /usr/bin/open "$PAGE"; then
+  note "OK: an den Standardbrowser übergeben"
+  exit 0
 fi
+
+note "FEHLER: open hat die Seite abgelehnt"
+alert "Die Seite konnte nicht geöffnet werden: $PAGE"
+exit 1
 LAUNCHER
 
 if [ "$APP_WINDOW" = true ]; then
@@ -84,13 +120,21 @@ if [ "$APP_WINDOW" = true ]; then
 #!/bin/bash
 # Own window without tabs or address bar, in a browser profile used by nothing
 # else. Needs a Chrome-family browser; falls back to the default browser.
-RESOURCES="$(cd "$(dirname "${BASH_SOURCE[0]}")/../Resources" && pwd)"
+SELF="${BASH_SOURCE[0]:-$0}"
+RESOURCES="$(cd "$(dirname "$SELF")/../Resources" && pwd)"
 PAGE="$RESOURCES/Metadaten-Editor.html"
 PROFILE="$HOME/Library/Application Support/Metadaten-Editor/browser"
+LOG="$HOME/Library/Logs/Metadaten-Editor.log"
+
+mkdir -p "$(dirname "$LOG")" 2>/dev/null
+note() { echo "$(/bin/date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG" 2>/dev/null; }
+
+note "Start im Fenstermodus (Seite: $PAGE)"
 
 while IFS= read -r BROWSER; do
   if [ -x "$BROWSER" ]; then
     mkdir -p "$PROFILE"
+    note "OK: starte $BROWSER im App-Modus"
     exec "$BROWSER" \
       --app="file://$PAGE" \
       --user-data-dir="$PROFILE" \
@@ -105,7 +149,8 @@ done <<'BROWSERS'
 /Applications/Chromium.app/Contents/MacOS/Chromium
 BROWSERS
 
-open "$PAGE"
+note "Kein Chrome-Browser gefunden, weiter mit dem Standardbrowser"
+/usr/bin/open "$PAGE"
 LAUNCHER
 fi
 
@@ -121,14 +166,69 @@ LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchS
 if [ -x "$LSREGISTER" ]; then "$LSREGISTER" -f "$APP" >/dev/null 2>&1 || true; fi
 touch "$APP" 2>/dev/null || true
 
+# --- Prüfung der Struktur --------------------------------------------------
+problems=0
+check() {
+  if eval "$2" >/dev/null 2>&1; then
+    echo "  ok    $1"
+  else
+    echo "  FEHLT $1"
+    problems=$((problems + 1))
+  fi
+}
+
 echo "Installiert: $APP"
+echo "Prüfe das Programmpaket:"
+check "Startprogramm ist ausführbar" '[ -x "$APP/Contents/MacOS/metadaten-editor" ]'
+check "Seite liegt im Paket"        '[ -s "$APP/Contents/Resources/Metadaten-Editor.html" ]'
+check "Symbol liegt im Paket"       '[ -s "$APP/Contents/Resources/icon.icns" ]'
+if command -v plutil >/dev/null 2>&1; then
+  check "Info.plist ist gültig" 'plutil -lint "$APP/Contents/Info.plist"'
+  check "Name im Info.plist"    '[ "$(plutil -extract CFBundleExecutable raw "$APP/Contents/Info.plist")" = "metadaten-editor" ]'
+fi
+if command -v codesign >/dev/null 2>&1; then
+  check "Signatur ist gültig" 'codesign --verify --deep "$APP"'
+fi
+check "keine Quarantäne" '! xattr -p com.apple.quarantine "$APP" 2>/dev/null'
+
+if [ "$problems" -gt 0 ]; then
+  echo
+  echo "$problems Punkt(e) stimmen nicht — die App würde beim Klick nicht starten." >&2
+  exit 1
+fi
+
+# --- Startprobe über Launch Services, also genau wie ein Klick in „Apps" ----
+LOG="$USER_HOME/Library/Logs/Metadaten-Editor.log"
+if [ "$SELFTEST" = true ] && command -v open >/dev/null 2>&1; then
+  echo
+  echo "Startprobe (genau der Weg, den ein Klick im Apps-Ordner nimmt):"
+  BEFORE=0
+  [ -f "$LOG" ] && BEFORE=$(wc -l < "$LOG" | tr -d ' ')
+  if "${RUN_AS_USER[@]}" open "$APP" 2>/dev/null; then
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      sleep 0.5
+      AFTER=0
+      [ -f "$LOG" ] && AFTER=$(wc -l < "$LOG" | tr -d ' ')
+      [ "$AFTER" -gt "$BEFORE" ] && break
+    done
+    if [ "${AFTER:-0}" -gt "$BEFORE" ]; then
+      echo "  ok    App wurde gestartet und hat sich gemeldet:"
+      tail -n 2 "$LOG" | sed 's/^/        /'
+    else
+      echo "  FEHLT App hat sich nicht gemeldet — Protokoll: $LOG" >&2
+      exit 1
+    fi
+  else
+    echo "  FEHLT Launch Services konnte die App nicht starten." >&2
+    exit 1
+  fi
+fi
+
+echo
 echo "Zu finden über Launchpad, Spotlight (cmd+Leertaste) oder den Programme-Ordner."
 if [ "$APP_WINDOW" = true ]; then
   echo "Startmodus: eigenes Fenster über einen Chrome-Browser."
 else
   echo "Startmodus: Standardbrowser. Für ein eigenes Fenster: erneut mit --fenster aufrufen."
 fi
-
-if [ "$OPEN_AFTER" = true ]; then
-  open "$APP"
-fi
+echo "Protokoll jedes Starts: $LOG"

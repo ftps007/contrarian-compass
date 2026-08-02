@@ -21,6 +21,23 @@ sudo ./standalone/build-app.sh /Applications
 Weil die App lokal erzeugt, von der Quarantäne befreit und ad-hoc signiert wird, startet sie ohne
 Gatekeeper-Nachfrage. Deinstallieren heißt: App in den Papierkorb ziehen.
 
+## Startprobe
+
+Das Installationsskript prüft zum Schluss das fertige Paket — Startprogramm ausführbar, Seite und
+Symbol vorhanden, Info.plist gültig, Signatur in Ordnung, keine Quarantäne — und startet die App
+anschließend über Launch Services. Das ist genau der Weg, den ein Klick auf das Symbol in der
+Apps-Übersicht nimmt. Meldet sich die App dabei nicht, endet das Skript mit einem Fehler, statt eine
+Installation zu melden, die beim Klicken nicht funktioniert.
+
+Jeder Start schreibt eine Zeile nach `~/Library/Logs/Metadaten-Editor.log`. Falls die App später
+einmal nicht aufgeht, steht dort, ob sie überhaupt gestartet ist und woran es lag:
+
+```
+tail -5 ~/Library/Logs/Metadaten-Editor.log
+```
+
+Mit `--ohne-start` lässt sich die Probe überspringen.
+
 ## Wie sie läuft
 
 Die App ist ein Bundle um eine einzelne HTML-Datei — kein Server, kein Netz, keine Laufzeit-
