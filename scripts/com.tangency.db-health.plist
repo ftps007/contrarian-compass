@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LaunchAgent: run the health check and push the report, unattended.
+
+  Once this is loaded there is nothing left to type. The report lands in git
+  on a schedule and can be read from there.
+
+  Install:
+    cp scripts/com.tangency.db-health.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.tangency.db-health.plist
+
+  Check it is registered:
+    launchctl list | grep db-health
+
+  Run it now instead of waiting:
+    launchctl start com.tangency.db-health
+
+  Remove:
+    launchctl unload ~/Library/LaunchAgents/com.tangency.db-health.plist
+
+  Schedule below: weekdays 23:30 (after the price load) with the standard
+  profile, and Saturday 09:00 with the full one. Adjust the Hour/Minute keys.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.tangency.db-health</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <!-- Weekday runs use the standard profile; Saturday uses full. One agent,
+         one script, the day decides which. -->
+    <string>cd "$HOME/tangency_portfolio" &amp;&amp; MODE=standard; [ "$(date +%u)" = "6" ] &amp;&amp; MODE=full; ./scripts/sync_report.sh "$MODE"</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DBCHECK</key>
+    <string>/tmp/dbcheck</string>
+    <key>STOCK_DB_NAME</key>
+    <string>stock_data</string>
+    <!-- A LaunchAgent gets a minimal PATH; psql and python must be findable. -->
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>23</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>23</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>23</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>23</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>23</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/db-health-sync.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/db-health-sync.err</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
