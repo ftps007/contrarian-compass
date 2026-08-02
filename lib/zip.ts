@@ -140,7 +140,8 @@ export async function writeZip(entries: ZipEntry[], timestamp?: Date): Promise<B
     const nameBytes = encoder.encode(entry.name)
     const crc = crc32(entry.data)
     const deflated = entry.data.length > 0 ? await deflateRaw(entry.data) : new Uint8Array(0)
-    const useDeflate = deflated.length < entry.data.length
+    // method 0 is honoured: OpenDocument requires an uncompressed mimetype entry.
+    const useDeflate = entry.method !== 0 && deflated.length < entry.data.length
     const payload = useDeflate ? deflated : entry.data
     const method = useDeflate ? 8 : 0
     const { dosTime, dosDate } = timestamp

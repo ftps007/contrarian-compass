@@ -7,24 +7,27 @@
  */
 
 import { readZip, writeZip, type ZipEntry } from './zip'
+import {
+  CONTENT_TYPES,
+  NS,
+  ROOT_RELS,
+  decodeText,
+  encodeText,
+  findEntry,
+  firstByTag,
+  parseXml,
+  removeParts,
+  serializeXml,
+  setContentTypeOverride,
+  setText,
+  textOf,
+} from './ooxmlPackage'
 
-export const NS = {
-  cp: 'http://schemas.openxmlformats.org/package/2006/metadata/core-properties',
-  dc: 'http://purl.org/dc/elements/1.1/',
-  dcterms: 'http://purl.org/dc/terms/',
-  dcmitype: 'http://purl.org/dc/dcmitype/',
-  xsi: 'http://www.w3.org/2001/XMLSchema-instance',
-  ep: 'http://schemas.openxmlformats.org/officeDocument/2006/extended-properties',
-  vt: 'http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes',
-  ct: 'http://schemas.openxmlformats.org/package/2006/content-types',
-  rel: 'http://schemas.openxmlformats.org/package/2006/relationships',
-  custom: 'http://schemas.openxmlformats.org/officeDocument/2006/custom-properties',
-}
+export { NS }
 
 const CORE_PART = 'docProps/core.xml'
 const APP_PART = 'docProps/app.xml'
 const CUSTOM_PART = 'docProps/custom.xml'
-const CONTENT_TYPES = '[Content_Types].xml'
 
 export type FieldKind = 'text' | 'longtext' | 'datetime' | 'number'
 
@@ -110,47 +113,6 @@ export const SUPPORTED_EXTENSIONS = [
   '.pptx', '.pptm', '.potx', '.ppsx', '.ppsm',
 ]
 
-const decoder = new TextDecoder()
-const encoder = new TextEncoder()
-
-function findEntry(entries: ZipEntry[], name: string): ZipEntry | undefined {
-  return entries.find((e) => e.name === name)
-}
-
-function textOf(entries: ZipEntry[], name: string): string | undefined {
-  const entry = findEntry(entries, name)
-  return entry ? decoder.decode(entry.data) : undefined
-}
-
-function setText(entries: ZipEntry[], name: string, xml: string): void {
-  const entry = findEntry(entries, name)
-  if (entry) {
-    entry.data = encoder.encode(xml)
-  } else {
-    entries.push({ name, data: encoder.encode(xml), method: 8, dosTime: 0, dosDate: 33, externalAttr: 0 })
-  }
-}
-
-function parseXml(xml: string, label: string): Document {
-  const doc = new DOMParser().parseFromString(xml, 'application/xml')
-  if (doc.getElementsByTagName('parsererror').length > 0) {
-    throw new Error(`XML konnte nicht gelesen werden: ${label}`)
-  }
-  return doc
-}
-
-function serializeXml(doc: Document): string {
-  const xml = new XMLSerializer().serializeToString(doc)
-  // Chromium keeps the original declaration, Firefox drops it — normalise both.
-  if (xml.startsWith('<?xml')) return xml
-  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' + xml
-}
-
-function firstByTag(doc: Document, ns: string, tag: string): Element | null {
-  const list = doc.getElementsByTagNameNS(ns, tag)
-  return list.length > 0 ? list[0] : null
-}
-
 /** W3CDTF ("2024-03-01T09:15:00Z") as used by dcterms fields. */
 export function toW3CDTF(date: Date): string {
   return date.toISOString().replace(/\.\d{3}Z$/, 'Z')
@@ -171,7 +133,23 @@ const APP_TEMPLATE = `<Properties xmlns="${NS.ep}" xmlns:vt="${NS.vt}"/>`
 // Reading
 // ---------------------------------------------------------------------------
 
-export async function loadDocument(file: File): Promise<OfficeDoc> {
+/** Property values of an already-unpacked package. */
+export function readOfficeFields(entries: ZipEntry[]): Record<string, string> {
+  const values: Record<string, string> = {}
+  const coreXml = textOf(entries, CORE_PART)
+  const appXml = textOf(entries, APP_PART)
+  const coreDoc = coreXml ? parseXml(coreXml, CORE_PART) : null
+  const appDoc = appXml ? parseXml(appXml, APP_PART) : null
+
+  for (const field of FIELDS) {
+    const doc = field.part === 'core' ? coreDoc : appDoc
+    const el = doc ? firstByTag(doc, field.ns, field.tag) : null
+    values[field.key] = el?.textContent ?? ''
+  }
+  return values
+}
+
+export async function loadDocument(file: { name: string; arrayBuffer(): Promise<ArrayBuffer> }): Promise<OfficeDoc> {
   const lower = file.name.toLowerCase()
   if (/\.(doc|xls|ppt)$/.test(lower)) {
     throw new Error(
@@ -206,7 +184,7 @@ export async function loadDocument(file: File): Promise<OfficeDoc> {
   }
 }
 
-function readCustomProps(entries: ZipEntry[]): CustomProp[] {
+export function readCustomProps(entries: ZipEntry[]): CustomProp[] {
   const xml = textOf(entries, CUSTOM_PART)
   if (!xml) return []
   const doc = parseXml(xml, CUSTOM_PART)
@@ -225,7 +203,7 @@ function readCustomProps(entries: ZipEntry[]): CustomProp[] {
 }
 
 /** Everything that identifies the document beyond the property panel. */
-function scanTraces(entries: ZipEntry[]): Trace[] {
+export function scanTraces(entries: ZipEntry[]): Trace[] {
   const traces: Trace[] = []
   const names = entries.map((e) => e.name)
 
@@ -317,7 +295,7 @@ function ensureCoreElement(doc: Document, field: FieldDef): Element {
   return el
 }
 
-function applyFields(entries: ZipEntry[], values: Record<string, string>, part: 'core' | 'app'): void {
+export function applyFields(entries: ZipEntry[], values: Record<string, string>, part: 'core' | 'app'): void {
   const partName = part === 'core' ? CORE_PART : APP_PART
   const fields = FIELDS.filter((f) => f.part === part)
   const wanted = fields.filter((f) => (values[f.key] ?? '').trim() !== '')
@@ -348,20 +326,7 @@ function ensureContentType(entries: ZipEntry[], partName: string): void {
     [APP_PART]: 'application/vnd.openxmlformats-officedocument.extended-properties+xml',
   }
   const contentType = types[partName]
-  if (!contentType) return
-
-  const xml = textOf(entries, CONTENT_TYPES)
-  if (!xml) return
-  const doc = parseXml(xml, CONTENT_TYPES)
-  const overrides = doc.getElementsByTagNameNS(NS.ct, 'Override')
-  for (let i = 0; i < overrides.length; i++) {
-    if (overrides[i].getAttribute('PartName') === `/${partName}`) return
-  }
-  const override = doc.createElementNS(NS.ct, 'Override')
-  override.setAttribute('PartName', `/${partName}`)
-  override.setAttribute('ContentType', contentType)
-  doc.documentElement.appendChild(override)
-  setText(entries, CONTENT_TYPES, serializeXml(doc))
+  if (contentType) setContentTypeOverride(entries, partName, contentType)
 }
 
 function ensureRootRelationship(entries: ZipEntry[], partName: string): void {
@@ -372,9 +337,9 @@ function ensureRootRelationship(entries: ZipEntry[], partName: string): void {
   const type = relTypes[partName]
   if (!type) return
 
-  const xml = textOf(entries, '_rels/.rels')
+  const xml = textOf(entries, ROOT_RELS)
   if (!xml) return
-  const doc = parseXml(xml, '_rels/.rels')
+  const doc = parseXml(xml, ROOT_RELS)
   const rels = doc.getElementsByTagNameNS(NS.rel, 'Relationship')
   const used = new Set<string>()
   for (let i = 0; i < rels.length; i++) {
@@ -389,86 +354,34 @@ function ensureRootRelationship(entries: ZipEntry[], partName: string): void {
   rel.setAttribute('Type', type)
   rel.setAttribute('Target', partName)
   doc.documentElement.appendChild(rel)
-  setText(entries, '_rels/.rels', serializeXml(doc))
+  setText(entries, ROOT_RELS, serializeXml(doc))
 }
 
-function resolveTarget(relsPath: string, target: string): string {
-  if (target.startsWith('/')) return target.slice(1)
-  const base = relsPath.replace(/_rels\/[^/]+$/, '')
-  const segments = (base + target).split('/')
-  const out: string[] = []
-  for (const segment of segments) {
-    if (segment === '.' || segment === '') continue
-    if (segment === '..') out.pop()
-    else out.push(segment)
-  }
-  return out.join('/')
-}
-
-/** Drop a part plus its content-type override and every relationship to it. */
-function removeParts(entries: ZipEntry[], predicate: (name: string) => boolean): string[] {
-  const removed = entries.filter((e) => predicate(e.name)).map((e) => e.name)
-  if (removed.length === 0) return []
-
-  for (const name of removed) {
-    const index = entries.findIndex((e) => e.name === name)
-    if (index >= 0) entries.splice(index, 1)
-  }
-
-  const typesXml = textOf(entries, CONTENT_TYPES)
-  if (typesXml) {
-    const doc = parseXml(typesXml, CONTENT_TYPES)
-    const overrides = Array.from(doc.getElementsByTagNameNS(NS.ct, 'Override'))
-    for (const override of overrides) {
-      const partName = (override.getAttribute('PartName') ?? '').replace(/^\//, '')
-      if (removed.includes(partName)) override.parentNode?.removeChild(override)
-    }
-    setText(entries, CONTENT_TYPES, serializeXml(doc))
-  }
-
-  for (const entry of entries.filter((e) => e.name.endsWith('.rels'))) {
-    const doc = parseXml(decoder.decode(entry.data), entry.name)
-    const rels = Array.from(doc.getElementsByTagNameNS(NS.rel, 'Relationship'))
-    let changed = false
-    for (const rel of rels) {
-      if (rel.getAttribute('TargetMode') === 'External') continue
-      const resolved = resolveTarget(entry.name, rel.getAttribute('Target') ?? '')
-      if (removed.includes(resolved)) {
-        rel.parentNode?.removeChild(rel)
-        changed = true
-      }
-    }
-    if (changed) entry.data = encoder.encode(serializeXml(doc))
-  }
-
-  return removed
-}
-
-function stripRsidsFromPackage(entries: ZipEntry[]): void {
+export function stripRsidsFromPackage(entries: ZipEntry[]): void {
   for (const entry of entries) {
     if (!/^word\/.*\.xml$/.test(entry.name)) continue
-    const xml = decoder.decode(entry.data)
+    const xml = decodeText(entry.data)
     const cleaned = xml
       .replace(/<w:rsids>[\s\S]*?<\/w:rsids>/g, '')
       .replace(/<w:rsid\b[^>]*\/>/g, '')
       .replace(/\s+w:rsid[A-Za-z]*="[^"]*"/g, '')
       .replace(/<w:proofState\b[^>]*\/>/g, '')
-    if (cleaned !== xml) entry.data = encoder.encode(cleaned)
+    if (cleaned !== xml) entry.data = encodeText(cleaned)
   }
 }
 
-function stripCommentsFromPackage(entries: ZipEntry[]): void {
+export function stripCommentsFromPackage(entries: ZipEntry[]): void {
   removeParts(entries, (name) => /^word\/comments.*\.xml$/.test(name) || name === 'word/people.xml')
 
   const documentEntry = findEntry(entries, 'word/document.xml')
   if (!documentEntry) return
-  const xml = decoder.decode(documentEntry.data)
+  const xml = decodeText(documentEntry.data)
   const cleaned = xml
     .replace(/<w:commentRange(?:Start|End)\b[^>]*\/>/g, '')
     .replace(/<w:commentReference\b[^>]*\/>/g, '')
     // The run wrapping a comment reference is left behind empty; drop it too.
     .replace(/<w:r>(?:\s*<w:rPr>[\s\S]*?<\/w:rPr>)?\s*<\/w:r>/g, '')
-  if (cleaned !== xml) documentEntry.data = encoder.encode(cleaned)
+  if (cleaned !== xml) documentEntry.data = encodeText(cleaned)
 }
 
 export interface BuildResult {
@@ -513,7 +426,7 @@ export async function buildDocument(
   return { blob: await writeZip(entries, timestamp), removedParts }
 }
 
-function applyCustomProps(entries: ZipEntry[], edited: CustomProp[]): void {
+export function applyCustomProps(entries: ZipEntry[], edited: CustomProp[]): void {
   const xml = textOf(entries, CUSTOM_PART)
   if (!xml) return
 
