@@ -66,6 +66,7 @@ INSERT INTO stock_indices (symbol, name) VALUES
     ('ARCA',    'NYSE Arca'),
     ('BATS',    'Cboe BZX'),
     ('OTC',     'Over-the-counter (Pink / OTCQB / OTCQX)'),
+    ('INDEXES', 'Market indices (^GSPC, ^VIX, ...)'),
     ('ETF',     'Exchange-traded funds and notes'),
     ('TEST',    'Exchange test issues (not tradable)'),
     ('UNKNOWN', 'Exchange code absent or not yet mapped'),

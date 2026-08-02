@@ -62,10 +62,15 @@ EXCHANGE_INDEX = {
     "BTS": "BATS",  "BATS": "BATS",
     "PNK": "OTC",   "OQB": "OTC",   "OQX": "OTC",
     "OTC": "OTC",   "OBB": "OTC",   "PK": "OTC",
+    # Seen on the live database: 10 tickers carry the literal exchange code
+    # INDEX (^GSPC and friends) and 3 carry YHD, a Yahoo-internal marker.
+    # Both are real venues-of-record for what they hold, so classify them
+    # rather than letting them sit in UNKNOWN forever.
+    "INDEX": "INDEXES", "YHD": "OTC",
 }
 
 # Every index this script maintains, in the order it processes them.
-MANAGED = ["NYSE", "IXIC", "AMEX", "ARCA", "BATS", "OTC",
+MANAGED = ["NYSE", "IXIC", "AMEX", "ARCA", "BATS", "OTC", "INDEXES",
            "ETF", "TEST", "UNKNOWN", "ALLUS"]
 
 
@@ -104,7 +109,12 @@ def classify(cur) -> dict[str, set[int]]:
 
         out["ALLUS"].add(sid)
 
-        venue = EXCHANGE_INDEX.get((exchange or "").strip().upper())
+        # A blank exchange is not the same as an unmapped one: the live
+        # database has 1,737 tickers with an empty string and 155 with NULL.
+        # Both mean "we never recorded a venue", which is a gap in `stocks`,
+        # not a hole in the map — the --report output distinguishes them so
+        # the map does not get padded with codes that do not exist.
+        venue = EXCHANGE_INDEX.get((exchange or "").strip().upper() or "\0")
         if venue:
             out[venue].add(sid)
         else:
@@ -260,7 +270,9 @@ def report(cur) -> None:
           f"{'  <-- should be 0' if orphans else '  OK'}")
 
     cur.execute("""
-        SELECT COALESCE(s.exchange, '(null)'), COUNT(*)
+        SELECT CASE WHEN s.exchange IS NULL THEN '(null)'
+                    WHEN btrim(s.exchange) = '' THEN '(empty string)'
+                    ELSE s.exchange END, COUNT(*)
           FROM stocks s
           JOIN stock_index_members m ON m.stock_id = s.id AND m.is_active
           JOIN stock_indices i ON i.id = m.index_id AND i.symbol = 'UNKNOWN'

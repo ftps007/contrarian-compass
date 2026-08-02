@@ -149,7 +149,11 @@ examples:
                         "needs)")
     p.add_argument("--window-days", type=int, default=400,
                    help="lookback for the scanners (default 400)")
-    p.add_argument("--limit", type=int, default=200)
+    # 200 was a safe default for a spot repair, and a bad one for a sweep: the
+    # live database had 7,250 invalid bars, so a run deleted 200 and reported
+    # success, needing 36 invocations to finish. Bars are removed one row at a
+    # time and re-fetched later, so a high ceiling costs nothing.
+    p.add_argument("--limit", type=int, default=20000)
     p.add_argument("--apply", action="store_true",
                    help="execute the deletes (default is dry-run)")
     args = p.parse_args(argv)
