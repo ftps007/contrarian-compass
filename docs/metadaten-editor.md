@@ -6,7 +6,7 @@ protokolliert, was passiert ist. Es gibt drei Zugänge auf dieselbe Maschinerie:
 | Zugang | Aufruf | Wofür |
 | --- | --- | --- |
 | Web-Seite | `/metadaten` in der App | Im Browser, mit Stapelverarbeitung |
-| Mac-App | `./standalone/build-app.sh --open` | Ohne Server, aus Launchpad |
+| Mac-App | `./standalone/build-app.sh` | Echtes Programmfenster, aus Launchpad |
 | Kommandozeile | `node cli/metadaten-clean.mjs` | Ordner, Skripte, Überwachung |
 
 Die Verarbeitung läuft immer lokal. In der Web-Seite und der App verlässt keine Datei den Browser.
@@ -129,6 +129,7 @@ lib/clean.ts            Dachmodul: Format erkennen, bereinigen, Bericht
 lib/profiles.ts         Profile und Beschriftungen der Schalter
 app/metadaten/page.tsx  Web-Oberfläche
 standalone/             Einzeldatei-Build und Mac-App
+standalone/native/      AppKit-Hülle (WKWebView) für die native Variante
 cli/                    Kommandozeile
 tests/                  npm test — bündelt die TypeScript-Quellen und prüft sie in Node
 ```

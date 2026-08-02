@@ -357,15 +357,36 @@ function render() {
   const cleaned = state.items.filter((item) => item.result && !item.result.error)
   $('clean').textContent = state.items.length === 1 ? 'Datei bereinigen' : `${state.items.length} Dateien bereinigen`
   $('download').classList.toggle('hidden', cleaned.length === 0)
-  $('download').textContent = cleaned.length === 1 ? 'Datei herunterladen' : 'Alle als ZIP herunterladen'
+  const verb = runsNative() ? 'sichern' : 'herunterladen'
+  $('download').textContent = cleaned.length === 1 ? `Datei ${verb}` : `Alle als ZIP ${verb}`
   $('report').classList.toggle('hidden', state.items.every((item) => !item.result))
+  $('report').textContent = `Protokoll ${verb}`
 }
 
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
 
+/** The native shell exposes a save bridge; in a browser we fall back to a download. */
+const nativeSave = () => globalThis.webkit?.messageHandlers?.speichern ?? null
+
+export const runsNative = () => nativeSave() !== null
+
+function toBase64(bytes) {
+  let binary = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk))
+  }
+  return btoa(binary)
+}
+
 function download(bytes, name, type = 'application/octet-stream') {
+  const bridge = nativeSave()
+  if (bridge) {
+    bridge.postMessage({ name, daten: toBase64(bytes) })
+    return
+  }
   const url = URL.createObjectURL(new Blob([bytes], { type }))
   const link = el('a', { href: url, download: name })
   document.body.appendChild(link)
@@ -384,11 +405,12 @@ function wireActions() {
         item.result = await cleanFile(item.file, item.values, item.customProps, state.options)
       }
       const failed = state.items.filter((item) => item.result?.error).length
+      const wohin = runsNative() ? 'Unten sichern.' : 'Unten herunterladen.'
       setMessage(
         failed > 0 ? 'error' : 'info',
         failed > 0
           ? `${failed} von ${state.items.length} Datei(en) konnten nicht bereinigt werden — Details unten.`
-          : `${state.items.length} Datei(en) bereinigt. Unten herunterladen.`
+          : `${state.items.length} Datei(en) bereinigt. ${wohin}`
       )
     } catch (err) {
       setMessage('error', err instanceof Error ? err.message : 'Die Bereinigung ist fehlgeschlagen.')
