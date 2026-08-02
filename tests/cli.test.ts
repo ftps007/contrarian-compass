@@ -123,3 +123,33 @@ await test('CLI: die Profile sind vollständig definiert', () => {
     'Profil "streng" muss alle Tiefenreinigungs-Schalter aktivieren'
   )
 })
+
+await test('CLI: ein Profil kann eine Vorlage für alle Dateien mitbringen', async () => {
+  const dir = await workspace()
+  const profil = join(dir, 'profil.json')
+  await writeFile(profil, JSON.stringify({ values: { title: 'Aus der Vorlage', creator: 'Anon' } }))
+
+  await run(['--profil-datei', profil, '--rekursiv', dir])
+  for (const datei of ['bericht-bereinigt.docm', join('unterordner', 'kopie-bereinigt.docx')]) {
+    const text = await packageText(join(dir, datei))
+    includes(text, '<dc:title>Aus der Vorlage</dc:title>', `Titel aus der Vorlage fehlt in ${datei}`)
+    includes(text, '<dc:creator>Anon</dc:creator>', `Autor aus der Vorlage fehlt in ${datei}`)
+  }
+
+  // --setzen sticht die Vorlage.
+  const dir2 = await workspace()
+  await run(['--profil-datei', profil, '--setzen', 'title=Direkt gesetzt', join(dir2, 'bericht.docm')])
+  includes(await packageText(join(dir2, 'bericht-bereinigt.docm')), '<dc:title>Direkt gesetzt</dc:title>', 'Vorrang von --setzen fehlt')
+})
+
+await test('CLI: Anonymisieren sticht einen gesetzten Namen', async () => {
+  const dir = await workspace()
+  const profil = join(dir, 'profil.json')
+  await writeFile(profil, JSON.stringify({ deep: { anonymizeAuthors: true }, values: { creator: 'Anon' } }))
+
+  await run(['--profil-datei', profil, join(dir, 'bericht.docm')])
+  const text = await packageText(join(dir, 'bericht-bereinigt.docm'))
+  // Der gesetzte Name wird mit anonymisiert — die stärkere Maßnahme gewinnt.
+  excludes(text, '<dc:creator>Anon</dc:creator>', 'Gesetzter Name blieb trotz Anonymisierung stehen')
+  includes(text, '<dc:creator>Autor ', 'Kein Platzhalter gesetzt')
+})

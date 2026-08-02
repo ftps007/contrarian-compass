@@ -433,15 +433,21 @@ export async function buildDocument(
 }
 
 export function applyCustomProps(entries: ZipEntry[], edited: CustomProp[]): void {
-  const xml = textOf(entries, CUSTOM_PART)
-  if (!xml) return
+  const existing = textOf(entries, CUSTOM_PART)
+
+  // Nothing there and nothing wanted — leave the package alone.
+  if (!existing && edited.length === 0) return
+
+  const doc = parseXml(
+    existing ??
+      `<Properties xmlns="${NS.custom}" xmlns:vt="${NS.vt}"/>`,
+    CUSTOM_PART
+  )
 
   const keptNames = new Set(edited.map((p) => p.name))
   const byName = new Map(edited.map((p) => [p.name, p] as [string, CustomProp]))
-  const doc = parseXml(xml, CUSTOM_PART)
-  const nodes = Array.from(doc.getElementsByTagNameNS(NS.custom, 'property'))
 
-  for (const node of nodes) {
+  for (const node of Array.from(doc.getElementsByTagNameNS(NS.custom, 'property'))) {
     const name = node.getAttribute('name') ?? ''
     if (!keptNames.has(name)) {
       node.parentNode?.removeChild(node)
@@ -449,16 +455,58 @@ export function applyCustomProps(entries: ZipEntry[], edited: CustomProp[]): voi
     }
     const valueEl = Array.from(node.children).find((c) => c.namespaceURI === NS.vt)
     if (valueEl) valueEl.textContent = byName.get(name)?.value ?? ''
+    byName.delete(name)
+  }
+
+  // Whatever is left in the map was added in the editor.
+  for (const prop of Array.from(byName.values())) {
+    const node = doc.createElementNS(NS.custom, 'property')
+    node.setAttribute('fmtid', '{D5CDD505-2E9C-101B-9397-08002B2CF9AE}')
+    node.setAttribute('name', prop.name)
+    const value = doc.createElementNS(NS.vt, `vt:${prop.type || 'lpwstr'}`)
+    value.textContent = prop.value
+    node.appendChild(value)
+    doc.documentElement.appendChild(node)
   }
 
   // An empty custom-properties part is itself a hint; drop it entirely.
   if (doc.getElementsByTagNameNS(NS.custom, 'property').length === 0) {
-    removeParts(entries, (name) => name === CUSTOM_PART)
+    if (existing) removeParts(entries, (name) => name === CUSTOM_PART)
     return
   }
 
-  // Renumber pids — they must be unique and start at 2.
-  const remaining = Array.from(doc.getElementsByTagNameNS(NS.custom, 'property'))
-  remaining.forEach((node, index) => node.setAttribute('pid', String(index + 2)))
+  // pids must be unique and start at 2.
+  Array.from(doc.getElementsByTagNameNS(NS.custom, 'property')).forEach((node, index) =>
+    node.setAttribute('pid', String(index + 2))
+  )
+
   setText(entries, CUSTOM_PART, serializeXml(doc))
+  if (!existing) {
+    setContentTypeOverride(entries, CUSTOM_PART, 'application/vnd.openxmlformats-officedocument.custom-properties+xml')
+    addRootRelationship(
+      entries,
+      'http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties',
+      CUSTOM_PART
+    )
+  }
+}
+
+/** Adds a relationship from the package root, if it is not there yet. */
+function addRootRelationship(entries: ZipEntry[], type: string, target: string): void {
+  const xml = textOf(entries, ROOT_RELS)
+  if (!xml) return
+  const doc = parseXml(xml, ROOT_RELS)
+  const used = new Set<string>()
+  for (const rel of Array.from(doc.getElementsByTagNameNS(NS.rel, 'Relationship'))) {
+    if (rel.getAttribute('Type') === type) return
+    used.add(rel.getAttribute('Id') ?? '')
+  }
+  let n = 1
+  while (used.has(`rId${n}`)) n++
+  const rel = doc.createElementNS(NS.rel, 'Relationship')
+  rel.setAttribute('Id', `rId${n}`)
+  rel.setAttribute('Type', type)
+  rel.setAttribute('Target', target)
+  doc.documentElement.appendChild(rel)
+  setText(entries, ROOT_RELS, serializeXml(doc))
 }

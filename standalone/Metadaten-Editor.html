@@ -95,6 +95,10 @@
       }
       .file-row:hover { background: var(--stone-50); }
       .file-row.active { background: #fffbeb; }
+      .file-entry { display: flex; align-items: center; border-bottom: 1px solid var(--stone-200); }
+      .file-entry .file-row { flex: 1; border-bottom: none; }
+      .file-remove { background: none; color: var(--stone-500); padding: .35rem .6rem; }
+      .file-remove:hover { background: #fee2e2; color: #991b1b; }
       .file-main { min-width: 0; }
       .file-name { display: block; font-weight: 600; color: var(--stone-800); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .badges { display: flex; gap: .35rem; flex-shrink: 0; }
@@ -108,6 +112,15 @@
       #findings { list-style: none; margin: 0; padding: 0; }
       #findings li { border-left: 2px solid var(--stone-300); padding-left: .75rem; margin-bottom: .85rem; }
       .finding-label { font-size: .875rem; font-weight: 600; color: var(--stone-700); margin: 0; }
+
+      .template-note { color: var(--stone-500); font-size: .8125rem; margin-bottom: 1rem; }
+      .template-field label { display: flex; align-items: center; gap: .5rem; }
+      .template-field input[type=checkbox] { accent-color: var(--amber-800); }
+      .template-field input:disabled { background: var(--stone-100); color: var(--stone-500); }
+      .custom-row { display: flex; align-items: flex-end; gap: .75rem; margin-bottom: .75rem; }
+      .custom-row .field { flex: 1; }
+      .custom-add { display: flex; align-items: flex-end; gap: .75rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--stone-200); }
+      .custom-add .field { flex: 1; }
 
       .check { display: flex; gap: .75rem; margin-bottom: .85rem; }
       .check input { margin-top: .25rem; accent-color: var(--amber-800); }
@@ -166,7 +179,22 @@
           <button id="clear" class="link">Liste leeren</button>
         </section>
 
+        <div id="templates"></div>
+
         <div id="fields"></div>
+
+        <section id="custom-section" class="hidden">
+          <h2>Benutzerdefinierte Eigenschaften</h2>
+          <p class="hint">
+            Freie Felder, die Vorlagen- und Dokumentenverwaltungssysteme gern mit Aktenzeichen oder Kürzeln füllen.
+          </p>
+          <div id="custom-props"></div>
+          <div class="custom-add">
+            <div class="field"><label for="custom-name">Neue Eigenschaft</label><input id="custom-name" type="text" placeholder="Name" /></div>
+            <div class="field"><label for="custom-value">Wert</label><input id="custom-value" type="text" /></div>
+            <button id="custom-add">Hinzufügen</button>
+          </div>
+        </section>
 
         <section id="findings-section" class="hidden">
           <h2 id="findings-title">Befund</h2>
@@ -748,13 +776,15 @@
     return removed;
   }
   function applyCustomProps(entries, edited) {
-    const xml = textOf(entries, CUSTOM_PART);
-    if (!xml) return;
+    const existing = textOf(entries, CUSTOM_PART);
+    if (!existing && edited.length === 0) return;
+    const doc = parseXml(
+      existing ?? `<Properties xmlns="${NS.custom}" xmlns:vt="${NS.vt}"/>`,
+      CUSTOM_PART
+    );
     const keptNames = new Set(edited.map((p) => p.name));
     const byName = new Map(edited.map((p) => [p.name, p]));
-    const doc = parseXml(xml, CUSTOM_PART);
-    const nodes = Array.from(doc.getElementsByTagNameNS(NS.custom, "property"));
-    for (const node of nodes) {
+    for (const node of Array.from(doc.getElementsByTagNameNS(NS.custom, "property"))) {
       const name = node.getAttribute("name") ?? "";
       if (!keptNames.has(name)) {
         node.parentNode?.removeChild(node);
@@ -762,14 +792,51 @@
       }
       const valueEl = Array.from(node.children).find((c) => c.namespaceURI === NS.vt);
       if (valueEl) valueEl.textContent = byName.get(name)?.value ?? "";
+      byName.delete(name);
+    }
+    for (const prop of Array.from(byName.values())) {
+      const node = doc.createElementNS(NS.custom, "property");
+      node.setAttribute("fmtid", "{D5CDD505-2E9C-101B-9397-08002B2CF9AE}");
+      node.setAttribute("name", prop.name);
+      const value = doc.createElementNS(NS.vt, `vt:${prop.type || "lpwstr"}`);
+      value.textContent = prop.value;
+      node.appendChild(value);
+      doc.documentElement.appendChild(node);
     }
     if (doc.getElementsByTagNameNS(NS.custom, "property").length === 0) {
-      removeParts(entries, (name) => name === CUSTOM_PART);
+      if (existing) removeParts(entries, (name) => name === CUSTOM_PART);
       return;
     }
-    const remaining = Array.from(doc.getElementsByTagNameNS(NS.custom, "property"));
-    remaining.forEach((node, index) => node.setAttribute("pid", String(index + 2)));
+    Array.from(doc.getElementsByTagNameNS(NS.custom, "property")).forEach(
+      (node, index) => node.setAttribute("pid", String(index + 2))
+    );
     setText(entries, CUSTOM_PART, serializeXml(doc));
+    if (!existing) {
+      setContentTypeOverride(entries, CUSTOM_PART, "application/vnd.openxmlformats-officedocument.custom-properties+xml");
+      addRootRelationship(
+        entries,
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties",
+        CUSTOM_PART
+      );
+    }
+  }
+  function addRootRelationship(entries, type, target) {
+    const xml = textOf(entries, ROOT_RELS);
+    if (!xml) return;
+    const doc = parseXml(xml, ROOT_RELS);
+    const used = /* @__PURE__ */ new Set();
+    for (const rel2 of Array.from(doc.getElementsByTagNameNS(NS.rel, "Relationship"))) {
+      if (rel2.getAttribute("Type") === type) return;
+      used.add(rel2.getAttribute("Id") ?? "");
+    }
+    let n = 1;
+    while (used.has(`rId${n}`)) n++;
+    const rel = doc.createElementNS(NS.rel, "Relationship");
+    rel.setAttribute("Id", `rId${n}`);
+    rel.setAttribute("Type", type);
+    rel.setAttribute("Target", target);
+    doc.documentElement.appendChild(rel);
+    setText(entries, ROOT_RELS, serializeXml(doc));
   }
 
   // lib/imageMeta.ts
@@ -3638,12 +3705,51 @@ ${xrefOffset}
     }
   ];
 
+  // lib/template.ts
+  var templateFrom = (file) => Object.fromEntries(
+    file.fields.map((field) => {
+      const value = file.values[field.key] ?? "";
+      return [field.key, { checked: value !== "", value }];
+    })
+  );
+  function applyTemplate(fields, template) {
+    const values = {};
+    for (const field of fields) {
+      const entry = template[field.key];
+      values[field.key] = entry?.checked ? entry.value : "";
+    }
+    return values;
+  }
+  function templateSummary(fields, template) {
+    let written = 0;
+    let deleted = 0;
+    for (const field of fields) {
+      if (template[field.key]?.checked) written++;
+      else deleted++;
+    }
+    return { written, deleted };
+  }
+  var KIND_LABELS = {
+    ooxml: "Word, Excel, PowerPoint",
+    odf: "OpenDocument",
+    pdf: "PDF",
+    ole2: "Alte Bin\xE4rformate (.doc/.xls/.ppt)",
+    rtf: "RTF",
+    image: "Bilder",
+    media: "Audio und Video",
+    unbekannt: "Unbekannt"
+  };
+
   // standalone/app.js
   var state = {
     items: [],
     selected: 0,
     profile: "standard",
-    options: DEFAULT_OPTIONS
+    options: DEFAULT_OPTIONS,
+    /** One template per format, keyed by file kind. */
+    templates: {},
+    /** Whether applying the Office template also copies the custom properties. */
+    templateCustomProps: false
   };
   var $ = (id) => document.getElementById(id);
   function el(tag, props = {}, children = []) {
@@ -3784,21 +3890,33 @@ ${xrefOffset}
         if (high > 0) badges.push(el("span", { class: "badge hoch", text: `${high}\xD7 hoch` }));
         if (item.result && !item.result.error) badges.push(el("span", { class: "badge ok", text: "bereinigt" }));
         if (item.result?.error) badges.push(el("span", { class: "badge hoch", text: "Fehler" }));
-        return el("button", {
-          class: `file-row ${index === state.selected ? "active" : ""}`,
-          onclick: () => {
-            state.selected = index;
-            render();
-          }
-        }, [
-          el("span", { class: "file-main" }, [
-            el("span", { class: "file-name", text: item.file.name }),
-            el("span", {
-              class: "hint",
-              text: `${item.file.kind} \xB7 ${Math.max(1, Math.round(item.file.size / 1024))} KB \xB7 ${item.file.findings.length} Fund(e)${item.file.error ? ` \xB7 ${item.file.error}` : ""}`
-            })
+        return el("div", { class: "file-entry" }, [
+          el("button", {
+            class: `file-row ${index === state.selected ? "active" : ""}`,
+            onclick: () => {
+              state.selected = index;
+              render();
+            }
+          }, [
+            el("span", { class: "file-main" }, [
+              el("span", { class: "file-name", text: item.file.name }),
+              el("span", {
+                class: "hint",
+                text: `${item.file.kind} \xB7 ${Math.max(1, Math.round(item.file.size / 1024))} KB \xB7 ${item.file.findings.length} Fund(e)${item.file.error ? ` \xB7 ${item.file.error}` : ""}`
+              })
+            ]),
+            el("span", { class: "badges" }, badges)
           ]),
-          el("span", { class: "badges" }, badges)
+          el("button", {
+            class: "file-remove",
+            title: "Datei aus der Liste entfernen",
+            text: "\u2715",
+            onclick: () => {
+              state.items.splice(index, 1);
+              if (state.selected >= state.items.length) state.selected = Math.max(0, state.items.length - 1);
+              render();
+            }
+          })
         ]);
       })
     );
@@ -3825,6 +3943,126 @@ ${xrefOffset}
     const children = [el("label", { text: field.label, for: input.id }), input];
     if (field.hint) children.push(el("p", { class: "hint", text: field.hint }));
     return el("div", { class: field.kind === "longtext" ? "field wide" : "field" }, children);
+  }
+  function templateBases() {
+    const bases = /* @__PURE__ */ new Map();
+    for (const item of state.items) {
+      if (item.file.fields.length > 0 && !bases.has(item.file.kind)) bases.set(item.file.kind, item.file);
+    }
+    return Array.from(bases.entries());
+  }
+  function templateFor(kind, base) {
+    if (!state.templates[kind]) state.templates[kind] = templateFrom(base);
+    return state.templates[kind];
+  }
+  function renderTemplates() {
+    const container = $("templates");
+    container.replaceChildren(
+      ...templateBases().map(([kind, base]) => {
+        const template = templateFor(kind, base);
+        const anzahl = state.items.filter((item) => item.file.kind === kind).length;
+        const felder = base.fields.map((field) => {
+          const entry = template[field.key] ?? { checked: false, value: "" };
+          const box = el("input", { type: "checkbox" });
+          box.checked = entry.checked;
+          const wert = el("input", {
+            type: field.kind === "number" ? "number" : field.kind === "datetime" ? "datetime-local" : "text"
+          });
+          wert.value = field.kind === "datetime" ? toLocalInput(entry.value) : entry.value;
+          wert.disabled = !entry.checked;
+          box.addEventListener("change", () => {
+            entry.checked = box.checked;
+            wert.disabled = !box.checked;
+          });
+          wert.addEventListener("input", () => {
+            entry.value = field.kind === "datetime" ? wert.value ? toW3CDTF(new Date(wert.value)) : "" : wert.value;
+          });
+          template[field.key] = entry;
+          return el("div", { class: `field template-field${field.kind === "longtext" ? " wide" : ""}` }, [
+            el("label", {}, [box, el("span", { text: field.label })]),
+            wert
+          ]);
+        });
+        const teile = [
+          el("h2", { text: `Vorlage f\xFCr ${KIND_LABELS[kind]}` }),
+          el("p", {
+            class: "template-note",
+            text: "Gilt f\xFCr alle geladenen Dateien dieses Formats. Nicht angehakte Felder werden gel\xF6scht."
+          }),
+          el("div", { class: "grid" }, felder)
+        ];
+        if (kind === "ooxml") {
+          const box = el("input", { type: "checkbox", id: "template-custom" });
+          box.checked = state.templateCustomProps;
+          box.addEventListener("change", () => state.templateCustomProps = box.checked);
+          teile.push(
+            el("label", { class: "check" }, [
+              box,
+              el("span", {}, [
+                el("span", { class: "check-label", text: "Benutzerdefinierte Eigenschaften mit \xFCbertragen" }),
+                el("span", {
+                  class: "hint",
+                  text: "\xDCbernimmt die Liste der ausgew\xE4hlten Datei in alle anderen dieses Formats."
+                })
+              ])
+            ])
+          );
+        }
+        return el("section", {}, [
+          ...teile,
+          el("button", {
+            text: `Auf alle ${anzahl} Datei(en) anwenden`,
+            onclick: () => {
+              const quelle = state.items[state.selected];
+              for (const item of state.items) {
+                if (item.file.kind !== kind) continue;
+                item.values = applyTemplate(item.file.fields, template);
+                if (kind === "ooxml" && state.templateCustomProps && quelle) {
+                  item.customProps = quelle.customProps.map((prop) => ({ ...prop }));
+                }
+              }
+              const { written, deleted } = templateSummary(base.fields, template);
+              setMessage("info", `Vorlage auf ${anzahl} Datei(en) angewendet: ${written} Feld(er) gesetzt, ${deleted} gel\xF6scht.`);
+              render();
+            }
+          })
+        ]);
+      })
+    );
+  }
+  function renderCustomProps() {
+    const item = state.items[state.selected];
+    const section = $("custom-section");
+    if (!item || item.file.kind !== "ooxml") {
+      section.classList.add("hidden");
+      return;
+    }
+    section.classList.remove("hidden");
+    const container = $("custom-props");
+    if (item.customProps.length === 0) {
+      container.replaceChildren(el("p", { class: "hint", text: "Keine vorhanden." }));
+    } else {
+      container.replaceChildren(
+        ...item.customProps.map((prop, index) => {
+          const input = el("input", { type: "text" });
+          input.value = prop.value;
+          input.addEventListener("input", () => item.customProps[index].value = input.value);
+          return el("div", { class: "custom-row" }, [
+            el("div", { class: "field" }, [
+              el("label", { text: `${prop.name} (${prop.type})` }),
+              input
+            ]),
+            el("button", {
+              text: "L\xF6schen",
+              onclick: () => {
+                item.customProps.splice(index, 1);
+                renderCustomProps();
+              }
+            })
+          ]);
+        })
+      );
+    }
   }
   function renderFields() {
     const container = $("fields");
@@ -3945,7 +4183,9 @@ ${xrefOffset}
     if (state.selected >= state.items.length) state.selected = 0;
     renderProfiles();
     renderFileList();
+    renderTemplates();
     renderFields();
+    renderCustomProps();
     renderFindings();
     renderOptions();
     renderResults();
@@ -4037,9 +4277,22 @@ ${xrefOffset}
       const text = buildReportText(entries, (/* @__PURE__ */ new Date()).toLocaleString("de-DE"));
       download(new TextEncoder().encode(text), "metadaten-protokoll.txt", "text/plain");
     });
+    $("custom-add").addEventListener("click", () => {
+      const item = state.items[state.selected];
+      const name = $("custom-name").value.trim();
+      if (!item || name === "") return;
+      item.customProps = [
+        ...item.customProps.filter((p) => p.name !== name),
+        { name, value: $("custom-value").value, type: "lpwstr" }
+      ];
+      $("custom-name").value = "";
+      $("custom-value").value = "";
+      renderCustomProps();
+    });
     $("clear").addEventListener("click", () => {
       state.items = [];
       state.selected = 0;
+      state.templates = {};
       setMessage(null, null);
       render();
     });

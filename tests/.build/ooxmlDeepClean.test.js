@@ -1,5 +1,19 @@
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
 // lib/imageMeta.ts
-var dec = new TextDecoder();
 function ascii(bytes2, start, length) {
   return dec.decode(bytes2.subarray(start, start + length));
 }
@@ -13,22 +27,6 @@ function detectFormat(bytes2) {
   if (bytes2[0] === 66 && bytes2[1] === 77) return "bmp";
   return "unknown";
 }
-var EXIF_TAGS = {
-  271: "Kamera-Hersteller",
-  272: "Kamera-Modell",
-  305: "Software",
-  306: "Aufnahmedatum",
-  315: "Fotograf",
-  33432: "Copyright"
-};
-var EXIF_SUB_TAGS = {
-  36867: "Aufnahmedatum",
-  42032: "Kamerabesitzer",
-  42033: "Seriennummer der Kamera",
-  42035: "Objektiv-Hersteller",
-  42037: "Objektiv-Seriennummer"
-};
-var TYPE_SIZES = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8 };
 function readTiff(bytes2, base) {
   const findings = [];
   if (base + 8 > bytes2.length) return findings;
@@ -130,7 +128,6 @@ function concat(chunks) {
   }
   return out;
 }
-var PNG_KEEP = /* @__PURE__ */ new Set(["IHDR", "PLTE", "IDAT", "IEND", "tRNS", "gAMA", "cHRM", "sRGB", "iCCP", "bKGD", "pHYs", "sBIT", "hIST", "sPLT"]);
 function stripImageMetadata(bytes2) {
   switch (detectFormat(bytes2)) {
     case "jpeg":
@@ -194,11 +191,11 @@ function stripWebp(bytes2) {
   let offset = 12;
   let sawMetadata = false;
   while (offset + 8 <= bytes2.length) {
-    const fourcc = ascii(bytes2, offset, 4);
+    const fourcc2 = ascii(bytes2, offset, 4);
     const size = view.getUint32(offset + 4, true);
     const padded = size + size % 2;
     const chunk = bytes2.subarray(offset, offset + 8 + padded);
-    if (fourcc === "EXIF" || fourcc === "XMP ") sawMetadata = true;
+    if (fourcc2 === "EXIF" || fourcc2 === "XMP ") sawMetadata = true;
     else kept.push(chunk);
     offset += 8 + padded;
   }
@@ -247,13 +244,32 @@ function stripGif(bytes2) {
   }
   return changed ? concat(out) : bytes2;
 }
+var dec, EXIF_TAGS, EXIF_SUB_TAGS, TYPE_SIZES, PNG_KEEP;
+var init_imageMeta = __esm({
+  "lib/imageMeta.ts"() {
+    "use strict";
+    dec = new TextDecoder();
+    EXIF_TAGS = {
+      271: "Kamera-Hersteller",
+      272: "Kamera-Modell",
+      305: "Software",
+      306: "Aufnahmedatum",
+      315: "Fotograf",
+      33432: "Copyright"
+    };
+    EXIF_SUB_TAGS = {
+      36867: "Aufnahmedatum",
+      42032: "Kamerabesitzer",
+      42033: "Seriennummer der Kamera",
+      42035: "Objektiv-Hersteller",
+      42037: "Objektiv-Seriennummer"
+    };
+    TYPE_SIZES = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8 };
+    PNG_KEEP = /* @__PURE__ */ new Set(["IHDR", "PLTE", "IDAT", "IEND", "tRNS", "gAMA", "cHRM", "sRGB", "iCCP", "bKGD", "pHYs", "sBIT", "hIST", "sPLT"]);
+  }
+});
 
 // lib/imageCrop.ts
-var MIME = {
-  jpeg: "image/jpeg",
-  png: "image/png",
-  webp: "image/webp"
-};
 function canFlattenCrops() {
   return typeof createImageBitmap === "function" && typeof OffscreenCanvas === "function";
 }
@@ -289,28 +305,20 @@ async function flattenCrop(bytes2, rect) {
     return null;
   }
 }
+var MIME;
+var init_imageCrop = __esm({
+  "lib/imageCrop.ts"() {
+    "use strict";
+    init_imageMeta();
+    MIME = {
+      jpeg: "image/jpeg",
+      png: "image/png",
+      webp: "image/webp"
+    };
+  }
+});
 
 // lib/ooxmlPackage.ts
-var NS = {
-  cp: "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
-  dc: "http://purl.org/dc/elements/1.1/",
-  dcterms: "http://purl.org/dc/terms/",
-  dcmitype: "http://purl.org/dc/dcmitype/",
-  xsi: "http://www.w3.org/2001/XMLSchema-instance",
-  ep: "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
-  vt: "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
-  ct: "http://schemas.openxmlformats.org/package/2006/content-types",
-  rel: "http://schemas.openxmlformats.org/package/2006/relationships",
-  custom: "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties",
-  w: "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
-  r: "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-  sheet: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
-  p: "http://schemas.openxmlformats.org/presentationml/2006/main",
-  chart: "http://schemas.openxmlformats.org/drawingml/2006/chart"
-};
-var CONTENT_TYPES = "[Content_Types].xml";
-var decoder = new TextDecoder();
-var encoder = new TextEncoder();
 function findEntry(entries, name) {
   return entries.find((e) => e.name === name);
 }
@@ -318,8 +326,6 @@ function textOf(entries, name) {
   const entry2 = findEntry(entries, name);
   return entry2 ? decoder.decode(entry2.data) : void 0;
 }
-var decodeText = (data) => decoder.decode(data);
-var encodeText = (text) => encoder.encode(text);
 function setText(entries, name, xml) {
   const entry2 = findEntry(entries, name);
   if (entry2) {
@@ -339,6 +345,10 @@ function serializeXml(doc) {
   const xml = new XMLSerializer().serializeToString(doc);
   if (xml.startsWith("<?xml")) return xml;
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' + xml;
+}
+function firstByTag(doc, ns, tag) {
+  const list = doc.getElementsByTagNameNS(ns, tag);
+  return list.length > 0 ? list[0] : null;
 }
 function editParts(entries, matches, edit) {
   const touched = [];
@@ -444,25 +454,54 @@ function readRelationships(entries, relsPath) {
     external: rel2.getAttribute("TargetMode") === "External"
   }));
 }
+function setContentTypeOverride(entries, partName, contentType) {
+  const xml = textOf(entries, CONTENT_TYPES);
+  if (!xml) return;
+  const doc = parseXml(xml, CONTENT_TYPES);
+  for (const override3 of Array.from(doc.getElementsByTagNameNS(NS.ct, "Override"))) {
+    if (override3.getAttribute("PartName") === `/${partName}`) {
+      override3.setAttribute("ContentType", contentType);
+      setText(entries, CONTENT_TYPES, serializeXml(doc));
+      return;
+    }
+  }
+  const override2 = doc.createElementNS(NS.ct, "Override");
+  override2.setAttribute("PartName", `/${partName}`);
+  override2.setAttribute("ContentType", contentType);
+  doc.documentElement.appendChild(override2);
+  setText(entries, CONTENT_TYPES, serializeXml(doc));
+}
+var NS, CONTENT_TYPES, ROOT_RELS, decoder, encoder, decodeText, encodeText;
+var init_ooxmlPackage = __esm({
+  "lib/ooxmlPackage.ts"() {
+    "use strict";
+    NS = {
+      cp: "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
+      dc: "http://purl.org/dc/elements/1.1/",
+      dcterms: "http://purl.org/dc/terms/",
+      dcmitype: "http://purl.org/dc/dcmitype/",
+      xsi: "http://www.w3.org/2001/XMLSchema-instance",
+      ep: "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
+      vt: "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
+      ct: "http://schemas.openxmlformats.org/package/2006/content-types",
+      rel: "http://schemas.openxmlformats.org/package/2006/relationships",
+      custom: "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties",
+      w: "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+      r: "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+      sheet: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+      p: "http://schemas.openxmlformats.org/presentationml/2006/main",
+      chart: "http://schemas.openxmlformats.org/drawingml/2006/chart"
+    };
+    CONTENT_TYPES = "[Content_Types].xml";
+    ROOT_RELS = "_rels/.rels";
+    decoder = new TextDecoder();
+    encoder = new TextEncoder();
+    decodeText = (data) => decoder.decode(data);
+    encodeText = (text) => encoder.encode(text);
+  }
+});
 
 // lib/ooxmlDeepClean.ts
-var DEFAULT_DEEP_OPTIONS = {
-  stripImageMetadata: true,
-  flattenCroppedImages: false,
-  clearPivotCaches: true,
-  removeHiddenSheets: false,
-  clearHiddenRowsCols: false,
-  removeHiddenSlides: false,
-  removeSpeakerNotes: false,
-  removePrinterSettings: true,
-  removeExternalLinks: true,
-  removeDocumentIds: true,
-  removeChartWorkbooks: false,
-  removeMacros: false,
-  anonymizeAuthors: false
-};
-var MEDIA = /^(word|xl|ppt)\/media\//;
-var isXml = (name) => name.endsWith(".xml");
 function scanDeep(entries) {
   const findings = [];
   const names = entries.map((e) => e.name);
@@ -726,7 +765,6 @@ function countHiddenRowsCols(entries) {
 function listHiddenSlides(entries) {
   return entries.filter((e) => /^ppt\/slides\/slide\d+\.xml$/.test(e.name)).filter((e) => /<p:sld[^>]*\sshow="(0|false)"/.test(decodeText(e.data))).map((e) => e.name);
 }
-var LOCAL_PATH = /^(file:|\\\\|[A-Za-z]:[\\/])/;
 function findExternalPaths(entries) {
   const found = [];
   for (const entry2 of entries) {
@@ -754,12 +792,6 @@ function findChartWorkbooks(entries) {
   }
   return found;
 }
-var AUTHOR_PATTERNS = [
-  /\sw:author="([^"]+)"/g,
-  /\sw15:author="([^"]+)"/g,
-  /<p:cmAuthor[^>]*\sname="([^"]+)"/g,
-  /<author>([^<]+)<\/author>/g
-];
 function collectAuthors(entries) {
   const authors = /* @__PURE__ */ new Set();
   for (const entry2 of entries) {
@@ -1095,16 +1127,6 @@ function removeChartWorkbooks(entries, log) {
   const removed = removePartsAndReferences(entries, (name) => charts.some((c) => c.target === name));
   log("removeChartWorkbooks", `${removed.length} eingebettete Diagramm-Arbeitsmappe(n) entfernt`, removed);
 }
-var MACRO_CONTENT_TYPES = {
-  "application/vnd.ms-word.document.macroEnabled.main+xml": "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
-  "application/vnd.ms-word.template.macroEnabledTemplate.main+xml": "application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml",
-  "application/vnd.ms-excel.sheet.macroEnabled.main+xml": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
-  "application/vnd.ms-excel.template.macroEnabled.main+xml": "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml",
-  "application/vnd.ms-powerpoint.presentation.macroEnabled.main+xml": "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml",
-  "application/vnd.ms-powerpoint.slideshow.macroEnabled.main+xml": "application/vnd.openxmlformats-officedocument.presentationml.slideshow.main+xml",
-  "application/vnd.ms-powerpoint.template.macroEnabled.main+xml": "application/vnd.openxmlformats-officedocument.presentationml.template.main+xml"
-};
-var NEW_EXTENSION = { docm: "docx", dotm: "dotx", xlsm: "xlsx", xltm: "xltx", pptm: "pptx", potm: "potx", ppsm: "ppsx" };
 function removeMacros(entries, log) {
   const removed = removeParts(entries, (name) => /vbaProject\.bin$|vbaData\.xml$/.test(name));
   if (removed.length === 0) return void 0;
@@ -1157,20 +1179,51 @@ function anonymizeAuthors(entries, log) {
     touched
   );
 }
+var DEFAULT_DEEP_OPTIONS, MEDIA, isXml, LOCAL_PATH, AUTHOR_PATTERNS, MACRO_CONTENT_TYPES, NEW_EXTENSION;
+var init_ooxmlDeepClean = __esm({
+  "lib/ooxmlDeepClean.ts"() {
+    "use strict";
+    init_imageMeta();
+    init_imageCrop();
+    init_ooxmlPackage();
+    DEFAULT_DEEP_OPTIONS = {
+      stripImageMetadata: true,
+      flattenCroppedImages: false,
+      clearPivotCaches: true,
+      removeHiddenSheets: false,
+      clearHiddenRowsCols: false,
+      removeHiddenSlides: false,
+      removeSpeakerNotes: false,
+      removePrinterSettings: true,
+      removeExternalLinks: true,
+      removeDocumentIds: true,
+      removeChartWorkbooks: false,
+      removeMacros: false,
+      anonymizeAuthors: false
+    };
+    MEDIA = /^(word|xl|ppt)\/media\//;
+    isXml = (name) => name.endsWith(".xml");
+    LOCAL_PATH = /^(file:|\\\\|[A-Za-z]:[\\/])/;
+    AUTHOR_PATTERNS = [
+      /\sw:author="([^"]+)"/g,
+      /\sw15:author="([^"]+)"/g,
+      /<p:cmAuthor[^>]*\sname="([^"]+)"/g,
+      /<author>([^<]+)<\/author>/g
+    ];
+    MACRO_CONTENT_TYPES = {
+      "application/vnd.ms-word.document.macroEnabled.main+xml": "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+      "application/vnd.ms-word.template.macroEnabledTemplate.main+xml": "application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml",
+      "application/vnd.ms-excel.sheet.macroEnabled.main+xml": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+      "application/vnd.ms-excel.template.macroEnabled.main+xml": "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml",
+      "application/vnd.ms-powerpoint.presentation.macroEnabled.main+xml": "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml",
+      "application/vnd.ms-powerpoint.slideshow.macroEnabled.main+xml": "application/vnd.openxmlformats-officedocument.presentationml.slideshow.main+xml",
+      "application/vnd.ms-powerpoint.template.macroEnabled.main+xml": "application/vnd.openxmlformats-officedocument.presentationml.template.main+xml"
+    };
+    NEW_EXTENSION = { docm: "docx", dotm: "dotx", xlsm: "xlsx", xltm: "xltx", pptm: "pptx", potm: "potx", ppsm: "ppsx" };
+  }
+});
 
 // lib/zip.ts
-var SIG_LOCAL = 67324752;
-var SIG_CENTRAL = 33639248;
-var SIG_EOCD = 101010256;
-var CRC_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let i = 0; i < 256; i++) {
-    let c = i;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 3988292384 ^ c >>> 1 : c >>> 1;
-    table[i] = c >>> 0;
-  }
-  return table;
-})();
 function crc32(bytes2) {
   let c = 4294967295;
   for (let i = 0; i < bytes2.length; i++) c = CRC_TABLE[(c ^ bytes2[i]) & 255] ^ c >>> 8;
@@ -1296,6 +1349,2275 @@ async function writeZip(entries, timestamp) {
     type: "application/octet-stream"
   });
 }
+var SIG_LOCAL, SIG_CENTRAL, SIG_EOCD, CRC_TABLE;
+var init_zip = __esm({
+  "lib/zip.ts"() {
+    "use strict";
+    SIG_LOCAL = 67324752;
+    SIG_CENTRAL = 33639248;
+    SIG_EOCD = 101010256;
+    CRC_TABLE = (() => {
+      const table = new Uint32Array(256);
+      for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 3988292384 ^ c >>> 1 : c >>> 1;
+        table[i] = c >>> 0;
+      }
+      return table;
+    })();
+  }
+});
+
+// lib/officeMetadata.ts
+var officeMetadata_exports = {};
+__export(officeMetadata_exports, {
+  DEFAULT_CLEANUP: () => DEFAULT_CLEANUP,
+  FIELDS: () => FIELDS,
+  NS: () => NS,
+  SUPPORTED_EXTENSIONS: () => SUPPORTED_EXTENSIONS,
+  applyCustomProps: () => applyCustomProps,
+  applyFields: () => applyFields,
+  buildDocument: () => buildDocument,
+  loadDocument: () => loadDocument,
+  readCustomProps: () => readCustomProps,
+  readOfficeFields: () => readOfficeFields,
+  scanTraces: () => scanTraces,
+  stripCommentsFromPackage: () => stripCommentsFromPackage,
+  stripRsidsFromPackage: () => stripRsidsFromPackage,
+  toLocalInput: () => toLocalInput,
+  toW3CDTF: () => toW3CDTF
+});
+function toW3CDTF(date) {
+  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+function toLocalInput(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+function readOfficeFields(entries) {
+  const values = {};
+  const coreXml = textOf(entries, CORE_PART);
+  const appXml = textOf(entries, APP_PART);
+  const coreDoc = coreXml ? parseXml(coreXml, CORE_PART) : null;
+  const appDoc = appXml ? parseXml(appXml, APP_PART) : null;
+  for (const field of FIELDS) {
+    const doc = field.part === "core" ? coreDoc : appDoc;
+    const el = doc ? firstByTag(doc, field.ns, field.tag) : null;
+    values[field.key] = el?.textContent ?? "";
+  }
+  return values;
+}
+async function loadDocument(file) {
+  const lower = file.name.toLowerCase();
+  if (/\.(doc|xls|ppt)$/.test(lower)) {
+    throw new Error(
+      "Das alte Bin\xE4rformat (.doc/.xls/.ppt) wird nicht unterst\xFCtzt. In Word/Excel als .docx/.xlsx speichern und erneut versuchen."
+    );
+  }
+  const entries = await readZip(await file.arrayBuffer());
+  if (!findEntry(entries, CONTENT_TYPES)) {
+    throw new Error("Kein OOXML-Paket \u2014 die Datei enth\xE4lt keine [Content_Types].xml.");
+  }
+  const values = {};
+  const coreXml = textOf(entries, CORE_PART);
+  const appXml = textOf(entries, APP_PART);
+  const coreDoc = coreXml ? parseXml(coreXml, CORE_PART) : null;
+  const appDoc = appXml ? parseXml(appXml, APP_PART) : null;
+  for (const field of FIELDS) {
+    const doc = field.part === "core" ? coreDoc : appDoc;
+    if (!doc) continue;
+    const el = firstByTag(doc, field.ns, field.tag);
+    values[field.key] = el?.textContent ?? "";
+  }
+  return {
+    fileName: file.name,
+    entries,
+    values,
+    customProps: readCustomProps(entries),
+    traces: scanTraces(entries)
+  };
+}
+function readCustomProps(entries) {
+  const xml = textOf(entries, CUSTOM_PART);
+  if (!xml) return [];
+  const doc = parseXml(xml, CUSTOM_PART);
+  const props = [];
+  const nodes = doc.getElementsByTagNameNS(NS.custom, "property");
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    const valueEl = Array.from(node.children).find((c) => c.namespaceURI === NS.vt);
+    props.push({
+      name: node.getAttribute("name") ?? `Eigenschaft ${i + 1}`,
+      value: valueEl?.textContent ?? "",
+      type: valueEl?.localName ?? "lpwstr"
+    });
+  }
+  return props;
+}
+function scanTraces(entries) {
+  const traces = [];
+  const names = entries.map((e) => e.name);
+  const settings = textOf(entries, "word/settings.xml") ?? "";
+  const documentXml = textOf(entries, "word/document.xml") ?? "";
+  const rsidCount = (settings.match(/<w:rsid\b/g) ?? []).length;
+  if (rsidCount > 0 || /\sw:rsid[A-Za-z]*="/.test(documentXml)) {
+    traces.push({
+      id: "rsids",
+      label: `${rsidCount} RSIDs (Revision Save IDs)`,
+      detail: "Word vergibt pro Bearbeitungssitzung eine ID. Damit lassen sich Dokumente derselben Herkunft einander zuordnen und Bearbeitungsrunden z\xE4hlen.",
+      removable: true
+    });
+  }
+  if (/<w:(ins|del|moveFrom|moveTo)\b/.test(documentXml)) {
+    traces.push({
+      id: "trackedChanges",
+      label: "Nachverfolgte \xC4nderungen im Text",
+      detail: 'Enth\xE4lt Autornamen und Zeitstempel direkt im Inhalt. Muss in Word \xFCber \u201E\xDCberpr\xFCfen \u2192 Alle \xC4nderungen annehmen" bereinigt werden \u2014 das ist Inhalt, keine Metadaten.',
+      removable: false
+    });
+  }
+  const commentParts = names.filter((n) => /^word\/comments.*\.xml$/.test(n) || n === "word/people.xml");
+  if (commentParts.length > 0) {
+    traces.push({
+      id: "comments",
+      label: "Kommentare / Personenliste",
+      detail: `Enthaltene Teile: ${commentParts.join(", ")}. Speichern Autornamen und Initialen.`,
+      removable: true
+    });
+  }
+  if (findEntry(entries, CUSTOM_PART)) {
+    traces.push({
+      id: "customProps",
+      label: "Benutzerdefinierte Eigenschaften",
+      detail: "Werden oft von DMS-, Kanzlei- oder Vorlagensystemen gesetzt und enthalten Aktenzeichen oder Benutzer-IDs.",
+      removable: true
+    });
+  }
+  if (names.some((n) => n.startsWith("docProps/thumbnail"))) {
+    traces.push({
+      id: "thumbnail",
+      label: "Vorschaubild",
+      detail: "Zeigt die erste Seite im urspr\xFCnglichen Zustand \u2014 \xFCberlebt sp\xE4tere Text\xE4nderungen.",
+      removable: true
+    });
+  }
+  if (names.some((n) => n.startsWith("_xmlsignatures/"))) {
+    traces.push({
+      id: "signature",
+      label: "Digitale Signatur",
+      detail: "Jede \xC4nderung an der Datei macht die Signatur ung\xFCltig \u2014 das ist unmittelbar sichtbar.",
+      removable: false
+    });
+  }
+  const dosDates = entries.map((e) => e.dosDate);
+  if (new Set(dosDates).size > 1) {
+    traces.push({
+      id: "zipTimestamps",
+      label: "Unterschiedliche ZIP-Zeitstempel",
+      detail: "Jeder Teil im Paket tr\xE4gt ein eigenes Datum. Passen die nicht zu den Dokumenteigenschaften, ist das ein deutliches Indiz f\xFCr nachtr\xE4gliche Bearbeitung.",
+      removable: true
+    });
+  }
+  return traces;
+}
+function ensureCoreElement(doc, field) {
+  const existing = firstByTag(doc, field.ns, field.tag);
+  if (existing) return existing;
+  const qualified = field.prefix ? `${field.prefix}:${field.tag}` : field.tag;
+  const el = doc.createElementNS(field.ns, qualified);
+  if (field.w3cdtf) el.setAttributeNS(NS.xsi, "xsi:type", "dcterms:W3CDTF");
+  doc.documentElement.appendChild(el);
+  return el;
+}
+function applyFields(entries, values, part) {
+  const partName = part === "core" ? CORE_PART : APP_PART;
+  const fields = FIELDS.filter((f) => f.part === part);
+  const wanted = fields.filter((f) => (values[f.key] ?? "").trim() !== "");
+  const existing = textOf(entries, partName);
+  if (!existing && wanted.length === 0) return;
+  const doc = parseXml(existing ?? (part === "core" ? CORE_TEMPLATE : APP_TEMPLATE), partName);
+  for (const field of fields) {
+    const value = (values[field.key] ?? "").trim();
+    const el = firstByTag(doc, field.ns, field.tag);
+    if (value === "") {
+      el?.parentNode?.removeChild(el);
+      continue;
+    }
+    ensureCoreElement(doc, field).textContent = value;
+  }
+  setText(entries, partName, serializeXml(doc));
+  ensureContentType(entries, partName);
+  ensureRootRelationship(entries, partName);
+}
+function ensureContentType(entries, partName) {
+  const types2 = {
+    [CORE_PART]: "application/vnd.openxmlformats-package.core-properties+xml",
+    [APP_PART]: "application/vnd.openxmlformats-officedocument.extended-properties+xml"
+  };
+  const contentType = types2[partName];
+  if (contentType) setContentTypeOverride(entries, partName, contentType);
+}
+function ensureRootRelationship(entries, partName) {
+  const relTypes = {
+    [CORE_PART]: "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
+    [APP_PART]: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties"
+  };
+  const type = relTypes[partName];
+  if (!type) return;
+  const xml = textOf(entries, ROOT_RELS);
+  if (!xml) return;
+  const doc = parseXml(xml, ROOT_RELS);
+  const rels2 = doc.getElementsByTagNameNS(NS.rel, "Relationship");
+  const used = /* @__PURE__ */ new Set();
+  for (let i = 0; i < rels2.length; i++) {
+    const rel3 = rels2[i];
+    if (rel3.getAttribute("Type") === type) return;
+    used.add(rel3.getAttribute("Id") ?? "");
+  }
+  let n = 1;
+  while (used.has(`rId${n}`)) n++;
+  const rel2 = doc.createElementNS(NS.rel, "Relationship");
+  rel2.setAttribute("Id", `rId${n}`);
+  rel2.setAttribute("Type", type);
+  rel2.setAttribute("Target", partName);
+  doc.documentElement.appendChild(rel2);
+  setText(entries, ROOT_RELS, serializeXml(doc));
+}
+function stripRsidsFromPackage(entries) {
+  const touched = [];
+  for (const entry2 of entries) {
+    if (!/^word\/.*\.xml$/.test(entry2.name)) continue;
+    const xml = decodeText(entry2.data);
+    const cleaned = xml.replace(/<w:rsids>[\s\S]*?<\/w:rsids>/g, "").replace(/<w:rsid\b[^>]*\/>/g, "").replace(/\s+w:rsid[A-Za-z]*="[^"]*"/g, "").replace(/<w:proofState\b[^>]*\/>/g, "");
+    if (cleaned !== xml) {
+      entry2.data = encodeText(cleaned);
+      touched.push(entry2.name);
+    }
+  }
+  return touched;
+}
+function stripCommentsFromPackage(entries) {
+  const removed = removeParts(entries, (name) => /^word\/comments.*\.xml$/.test(name) || name === "word/people.xml");
+  const documentEntry = findEntry(entries, "word/document.xml");
+  if (!documentEntry) return removed;
+  const xml = decodeText(documentEntry.data);
+  const cleaned = xml.replace(/<w:commentRange(?:Start|End)\b[^>]*\/>/g, "").replace(/<w:commentReference\b[^>]*\/>/g, "").replace(/<w:r>(?:\s*<w:rPr>[\s\S]*?<\/w:rPr>)?\s*<\/w:r>/g, "");
+  if (cleaned !== xml) documentEntry.data = encodeText(cleaned);
+  return removed;
+}
+async function buildDocument(doc, values, customProps, options) {
+  const entries = doc.entries.map((e) => ({ ...e, data: new Uint8Array(e.data) }));
+  const removedParts = [];
+  applyFields(entries, values, "core");
+  applyFields(entries, values, "app");
+  if (options.stripCustomProps) {
+    removedParts.push(...removeParts(entries, (name) => name === CUSTOM_PART));
+  } else {
+    applyCustomProps(entries, customProps);
+  }
+  if (options.stripThumbnail) {
+    removedParts.push(...removeParts(entries, (name) => name.startsWith("docProps/thumbnail")));
+  }
+  if (options.stripComments) {
+    stripCommentsFromPackage(entries);
+    removedParts.push("word/comments*.xml", "word/people.xml");
+  }
+  if (options.stripRsids) stripRsidsFromPackage(entries);
+  let timestamp;
+  if (options.normalizeZipTimestamps) {
+    const modified = new Date(values.modified || values.created || Date.now());
+    timestamp = Number.isNaN(modified.getTime()) ? /* @__PURE__ */ new Date() : modified;
+  }
+  return { blob: await writeZip(entries, timestamp), removedParts };
+}
+function applyCustomProps(entries, edited) {
+  const existing = textOf(entries, CUSTOM_PART);
+  if (!existing && edited.length === 0) return;
+  const doc = parseXml(
+    existing ?? `<Properties xmlns="${NS.custom}" xmlns:vt="${NS.vt}"/>`,
+    CUSTOM_PART
+  );
+  const keptNames = new Set(edited.map((p) => p.name));
+  const byName = new Map(edited.map((p) => [p.name, p]));
+  for (const node of Array.from(doc.getElementsByTagNameNS(NS.custom, "property"))) {
+    const name = node.getAttribute("name") ?? "";
+    if (!keptNames.has(name)) {
+      node.parentNode?.removeChild(node);
+      continue;
+    }
+    const valueEl = Array.from(node.children).find((c) => c.namespaceURI === NS.vt);
+    if (valueEl) valueEl.textContent = byName.get(name)?.value ?? "";
+    byName.delete(name);
+  }
+  for (const prop of Array.from(byName.values())) {
+    const node = doc.createElementNS(NS.custom, "property");
+    node.setAttribute("fmtid", "{D5CDD505-2E9C-101B-9397-08002B2CF9AE}");
+    node.setAttribute("name", prop.name);
+    const value = doc.createElementNS(NS.vt, `vt:${prop.type || "lpwstr"}`);
+    value.textContent = prop.value;
+    node.appendChild(value);
+    doc.documentElement.appendChild(node);
+  }
+  if (doc.getElementsByTagNameNS(NS.custom, "property").length === 0) {
+    if (existing) removeParts(entries, (name) => name === CUSTOM_PART);
+    return;
+  }
+  Array.from(doc.getElementsByTagNameNS(NS.custom, "property")).forEach(
+    (node, index) => node.setAttribute("pid", String(index + 2))
+  );
+  setText(entries, CUSTOM_PART, serializeXml(doc));
+  if (!existing) {
+    setContentTypeOverride(entries, CUSTOM_PART, "application/vnd.openxmlformats-officedocument.custom-properties+xml");
+    addRootRelationship(
+      entries,
+      "http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties",
+      CUSTOM_PART
+    );
+  }
+}
+function addRootRelationship(entries, type, target) {
+  const xml = textOf(entries, ROOT_RELS);
+  if (!xml) return;
+  const doc = parseXml(xml, ROOT_RELS);
+  const used = /* @__PURE__ */ new Set();
+  for (const rel3 of Array.from(doc.getElementsByTagNameNS(NS.rel, "Relationship"))) {
+    if (rel3.getAttribute("Type") === type) return;
+    used.add(rel3.getAttribute("Id") ?? "");
+  }
+  let n = 1;
+  while (used.has(`rId${n}`)) n++;
+  const rel2 = doc.createElementNS(NS.rel, "Relationship");
+  rel2.setAttribute("Id", `rId${n}`);
+  rel2.setAttribute("Type", type);
+  rel2.setAttribute("Target", target);
+  doc.documentElement.appendChild(rel2);
+  setText(entries, ROOT_RELS, serializeXml(doc));
+}
+var CORE_PART, APP_PART, CUSTOM_PART, FIELDS, DEFAULT_CLEANUP, SUPPORTED_EXTENSIONS, CORE_TEMPLATE, APP_TEMPLATE;
+var init_officeMetadata = __esm({
+  "lib/officeMetadata.ts"() {
+    "use strict";
+    init_zip();
+    init_ooxmlPackage();
+    CORE_PART = "docProps/core.xml";
+    APP_PART = "docProps/app.xml";
+    CUSTOM_PART = "docProps/custom.xml";
+    FIELDS = [
+      { key: "title", label: "Titel", kind: "text", part: "core", ns: NS.dc, prefix: "dc", tag: "title" },
+      { key: "subject", label: "Thema", kind: "text", part: "core", ns: NS.dc, prefix: "dc", tag: "subject" },
+      { key: "creator", label: "Autor", hint: "dc:creator \u2014 der urspr\xFCngliche Verfasser", kind: "text", part: "core", ns: NS.dc, prefix: "dc", tag: "creator" },
+      { key: "lastModifiedBy", label: "Zuletzt ge\xE4ndert von", kind: "text", part: "core", ns: NS.cp, prefix: "cp", tag: "lastModifiedBy" },
+      { key: "keywords", label: "Stichw\xF6rter", kind: "text", part: "core", ns: NS.cp, prefix: "cp", tag: "keywords" },
+      { key: "description", label: "Kommentare", kind: "longtext", part: "core", ns: NS.dc, prefix: "dc", tag: "description" },
+      { key: "category", label: "Kategorie", kind: "text", part: "core", ns: NS.cp, prefix: "cp", tag: "category" },
+      { key: "contentStatus", label: "Status", kind: "text", part: "core", ns: NS.cp, prefix: "cp", tag: "contentStatus" },
+      { key: "revision", label: "Revisionsnummer", hint: "Wie oft das Dokument gespeichert wurde", kind: "number", part: "core", ns: NS.cp, prefix: "cp", tag: "revision" },
+      { key: "version", label: "Version", kind: "text", part: "core", ns: NS.cp, prefix: "cp", tag: "version" },
+      { key: "language", label: "Sprache", kind: "text", part: "core", ns: NS.dc, prefix: "dc", tag: "language" },
+      { key: "created", label: "Erstellt am", kind: "datetime", part: "core", ns: NS.dcterms, prefix: "dcterms", tag: "created", w3cdtf: true },
+      { key: "modified", label: "Ge\xE4ndert am", kind: "datetime", part: "core", ns: NS.dcterms, prefix: "dcterms", tag: "modified", w3cdtf: true },
+      { key: "lastPrinted", label: "Zuletzt gedruckt", kind: "datetime", part: "core", ns: NS.cp, prefix: "cp", tag: "lastPrinted" },
+      { key: "Company", label: "Firma", kind: "text", part: "app", ns: NS.ep, prefix: "", tag: "Company" },
+      { key: "Manager", label: "Vorgesetzter", kind: "text", part: "app", ns: NS.ep, prefix: "", tag: "Manager" },
+      { key: "Application", label: "Erstellt mit", hint: 'z. B. "Microsoft Office Word"', kind: "text", part: "app", ns: NS.ep, prefix: "", tag: "Application" },
+      { key: "AppVersion", label: "Programmversion", hint: "Format: 16.0000", kind: "text", part: "app", ns: NS.ep, prefix: "", tag: "AppVersion" },
+      { key: "Template", label: "Vorlage", kind: "text", part: "app", ns: NS.ep, prefix: "", tag: "Template" },
+      { key: "TotalTime", label: "Bearbeitungszeit (Min.)", kind: "number", part: "app", ns: NS.ep, prefix: "", tag: "TotalTime" },
+      { key: "HyperlinkBase", label: "Hyperlink-Basis", hint: "Enth\xE4lt oft lokale Pfade", kind: "text", part: "app", ns: NS.ep, prefix: "", tag: "HyperlinkBase" }
+    ];
+    DEFAULT_CLEANUP = {
+      stripRsids: true,
+      stripCustomProps: false,
+      stripThumbnail: true,
+      stripComments: false,
+      normalizeZipTimestamps: true
+    };
+    SUPPORTED_EXTENSIONS = [
+      ".docx",
+      ".docm",
+      ".dotx",
+      ".dotm",
+      ".xlsx",
+      ".xlsm",
+      ".xltx",
+      ".xltm",
+      ".pptx",
+      ".pptm",
+      ".potx",
+      ".ppsx",
+      ".ppsm"
+    ];
+    CORE_TEMPLATE = `<cp:coreProperties xmlns:cp="${NS.cp}" xmlns:dc="${NS.dc}" xmlns:dcterms="${NS.dcterms}" xmlns:dcmitype="${NS.dcmitype}" xmlns:xsi="${NS.xsi}"/>`;
+    APP_TEMPLATE = `<Properties xmlns="${NS.ep}" xmlns:vt="${NS.vt}"/>`;
+  }
+});
+
+// lib/template.ts
+var template_exports = {};
+__export(template_exports, {
+  KIND_LABELS: () => KIND_LABELS,
+  applyTemplate: () => applyTemplate,
+  emptyTemplate: () => emptyTemplate,
+  templateFrom: () => templateFrom,
+  templateSummary: () => templateSummary
+});
+function applyTemplate(fields, template) {
+  const values = {};
+  for (const field of fields) {
+    const entry2 = template[field.key];
+    values[field.key] = entry2?.checked ? entry2.value : "";
+  }
+  return values;
+}
+function templateSummary(fields, template) {
+  let written = 0;
+  let deleted = 0;
+  for (const field of fields) {
+    if (template[field.key]?.checked) written++;
+    else deleted++;
+  }
+  return { written, deleted };
+}
+var emptyTemplate, templateFrom, KIND_LABELS;
+var init_template = __esm({
+  "lib/template.ts"() {
+    "use strict";
+    emptyTemplate = (fields) => Object.fromEntries(fields.map((field) => [field.key, { checked: false, value: "" }]));
+    templateFrom = (file) => Object.fromEntries(
+      file.fields.map((field) => {
+        const value = file.values[field.key] ?? "";
+        return [field.key, { checked: value !== "", value }];
+      })
+    );
+    KIND_LABELS = {
+      ooxml: "Word, Excel, PowerPoint",
+      odf: "OpenDocument",
+      pdf: "PDF",
+      ole2: "Alte Bin\xE4rformate (.doc/.xls/.ppt)",
+      rtf: "RTF",
+      image: "Bilder",
+      media: "Audio und Video",
+      unbekannt: "Unbekannt"
+    };
+  }
+});
+
+// lib/odf.ts
+function isOdfPackage(entries) {
+  const mimetype = textOf(entries, "mimetype") ?? "";
+  return mimetype.startsWith("application/vnd.oasis.opendocument") || Boolean(findEntry(entries, META_PART));
+}
+function readOdfFields(entries) {
+  const values = {};
+  const xml = textOf(entries, META_PART);
+  if (!xml) return values;
+  const doc = parseXml(xml, META_PART);
+  for (const field of ODF_FIELDS) {
+    const nodes = doc.getElementsByTagNameNS(field.ns, field.tag);
+    values[field.key] = nodes.length > 0 ? nodes[0].textContent ?? "" : "";
+  }
+  return values;
+}
+function writeOdfFields(entries, values) {
+  const xml = textOf(entries, META_PART);
+  if (!xml) return;
+  const doc = parseXml(xml, META_PART);
+  const meta = doc.getElementsByTagNameNS(ODF_NS.office, "meta")[0] ?? doc.documentElement;
+  for (const field of ODF_FIELDS) {
+    const value = (values[field.key] ?? "").trim();
+    const nodes = Array.from(doc.getElementsByTagNameNS(field.ns, field.tag));
+    if (value === "") {
+      for (const node2 of nodes) node2.parentNode?.removeChild(node2);
+      continue;
+    }
+    const node = nodes[0] ?? meta.appendChild(doc.createElementNS(field.ns, `${field.prefix}:${field.tag}`));
+    node.textContent = value;
+  }
+  for (const stat of Array.from(doc.getElementsByTagNameNS(ODF_NS.meta, "document-statistic"))) {
+    stat.parentNode?.removeChild(stat);
+  }
+  setText(entries, META_PART, serializeXml(doc));
+}
+function scanOdf(entries) {
+  const findings = [];
+  const names = entries.map((e) => e.name);
+  const images = entries.filter((e) => PICTURES.test(e.name) && inspectImage(e.data).length > 0);
+  if (images.length > 0) {
+    findings.push({
+      id: "imageMetadata",
+      label: `Metadaten in ${images.length} eingebetteten Bild(ern)`,
+      detail: "Auch LibreOffice \xFCbernimmt EXIF-Daten samt GPS-Position unver\xE4ndert in das Dokument.",
+      severity: "hoch"
+    });
+  }
+  if (names.some((n) => n.startsWith("Thumbnails/"))) {
+    findings.push({
+      id: "thumbnail",
+      label: "Vorschaubild",
+      detail: "Zeigt die erste Seite in einem m\xF6glicherweise \xE4lteren Stand.",
+      severity: "mittel"
+    });
+  }
+  const content = textOf(entries, "content.xml") ?? "";
+  const authors = Array.from(content.matchAll(/<dc:creator>([^<]+)<\/dc:creator>/g)).map((m) => m[1]);
+  if (authors.length > 0) {
+    findings.push({
+      id: "authors",
+      label: `${new Set(authors).size} Personenname(n) in Kommentaren und \xC4nderungen`,
+      detail: `Gefunden: ${Array.from(new Set(authors)).join(", ")}.`,
+      severity: "hoch"
+    });
+  }
+  if (content.includes("<text:tracked-changes")) {
+    findings.push({
+      id: "trackedChanges",
+      label: "Nachverfolgte \xC4nderungen",
+      detail: 'Enthalten Autorennamen und Zeitpunkte. In LibreOffice \xFCber \u201EBearbeiten \u2192 \xC4nderungen \u2192 Alle akzeptieren" bereinigen.',
+      severity: "hoch"
+    });
+  }
+  const meta = textOf(entries, META_PART) ?? "";
+  if (meta.includes("<meta:user-defined")) {
+    findings.push({
+      id: "userFields",
+      label: "Benutzerdefinierte Felder",
+      detail: "Freie Felder in meta.xml, oft von Vorlagen mit Aktenzeichen oder K\xFCrzeln gef\xFCllt.",
+      severity: "mittel"
+    });
+  }
+  return findings;
+}
+function cleanOdf(entries, options) {
+  const steps = [];
+  if (options.removeThumbnail) {
+    const removed = removeParts(entries, (name) => name.startsWith("Thumbnails/"));
+    if (removed.length > 0) steps.push("Vorschaubild entfernt");
+  }
+  if (options.stripImageMetadata) {
+    let cleaned = 0;
+    for (const entry2 of entries) {
+      if (!PICTURES.test(entry2.name)) continue;
+      const stripped = stripImageMetadata(entry2.data);
+      if (stripped.length !== entry2.data.length) {
+        entry2.data = stripped;
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) steps.push(`EXIF/XMP aus ${cleaned} Bild(ern) entfernt`);
+  }
+  if (options.removeUserFields) {
+    const touched = editParts(
+      entries,
+      (name) => name === META_PART,
+      (xml) => xml.replace(/<meta:user-defined[\s\S]*?<\/meta:user-defined>/g, "").replace(/<meta:user-defined[^/>]*\/>/g, "")
+    );
+    if (touched.length > 0) steps.push("Benutzerdefinierte Felder entfernt");
+  }
+  if (options.anonymizeAuthors) {
+    const content = textOf(entries, "content.xml") ?? "";
+    const authors = Array.from(new Set(Array.from(content.matchAll(/<dc:creator>([^<]+)<\/dc:creator>/g)).map((m) => m[1]))).filter((name) => !/^Autor \d+$/.test(name));
+    if (authors.length > 0) {
+      const mapping = new Map(authors.map((name, index) => [name, `Autor ${index + 1}`]));
+      editParts(
+        entries,
+        (name) => name.endsWith(".xml"),
+        (xml) => {
+          let next = xml;
+          for (const [from, to] of Array.from(mapping.entries())) {
+            const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            next = next.replace(new RegExp(`(<dc:creator>)${escaped}(</dc:creator>)`, "g"), `$1${to}$2`);
+          }
+          return next;
+        }
+      );
+      steps.push(`${mapping.size} Name(n) ersetzt: ${Array.from(mapping.entries()).map(([f, t]) => `${f} \u2192 ${t}`).join(", ")}`);
+    }
+  }
+  return steps;
+}
+function sortOdfEntries(entries) {
+  const mimetype = findEntry(entries, "mimetype");
+  if (!mimetype) return entries;
+  mimetype.method = 0;
+  return [mimetype, ...entries.filter((e) => e !== mimetype)];
+}
+var ODF_NS, META_PART, PICTURES, ODF_FIELDS, DEFAULT_ODF_CLEAN;
+var init_odf = __esm({
+  "lib/odf.ts"() {
+    "use strict";
+    init_imageMeta();
+    init_ooxmlPackage();
+    ODF_NS = {
+      office: "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
+      meta: "urn:oasis:names:tc:opendocument:xmlns:meta:1.0",
+      dc: "http://purl.org/dc/elements/1.1/",
+      text: "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+    };
+    META_PART = "meta.xml";
+    PICTURES = /^Pictures\//;
+    ODF_FIELDS = [
+      { key: "title", label: "Titel", ns: ODF_NS.dc, prefix: "dc", tag: "title", kind: "text" },
+      { key: "subject", label: "Thema", ns: ODF_NS.dc, prefix: "dc", tag: "subject", kind: "text" },
+      { key: "description", label: "Kommentare", ns: ODF_NS.dc, prefix: "dc", tag: "description", kind: "text" },
+      { key: "keyword", label: "Stichw\xF6rter", ns: ODF_NS.meta, prefix: "meta", tag: "keyword", kind: "text" },
+      { key: "initial-creator", label: "Autor", ns: ODF_NS.meta, prefix: "meta", tag: "initial-creator", kind: "text" },
+      { key: "creator", label: "Zuletzt ge\xE4ndert von", ns: ODF_NS.dc, prefix: "dc", tag: "creator", kind: "text" },
+      { key: "creation-date", label: "Erstellt am", ns: ODF_NS.meta, prefix: "meta", tag: "creation-date", kind: "datetime" },
+      { key: "date", label: "Ge\xE4ndert am", ns: ODF_NS.dc, prefix: "dc", tag: "date", kind: "datetime" },
+      { key: "print-date", label: "Zuletzt gedruckt", ns: ODF_NS.meta, prefix: "meta", tag: "print-date", kind: "datetime" },
+      { key: "printed-by", label: "Gedruckt von", ns: ODF_NS.meta, prefix: "meta", tag: "printed-by", kind: "text" },
+      { key: "generator", label: "Erstellt mit", ns: ODF_NS.meta, prefix: "meta", tag: "generator", kind: "text" },
+      { key: "editing-cycles", label: "Bearbeitungszyklen", ns: ODF_NS.meta, prefix: "meta", tag: "editing-cycles", kind: "number" },
+      { key: "editing-duration", label: "Bearbeitungsdauer", ns: ODF_NS.meta, prefix: "meta", tag: "editing-duration", kind: "text" }
+    ];
+    DEFAULT_ODF_CLEAN = {
+      removeThumbnail: true,
+      stripImageMetadata: true,
+      anonymizeAuthors: false,
+      removeUserFields: true
+    };
+  }
+});
+
+// lib/pdf.ts
+function endsWithEndstream(bytes2, at) {
+  let i = at;
+  while (i < bytes2.length && isWhite(bytes2[i])) i++;
+  return latin1.decode(bytes2.subarray(i, i + 9)) === "endstream";
+}
+function indexOfSequence(bytes2, text, from) {
+  const needle = new TextEncoder().encode(text);
+  outer: for (let i = Math.max(0, from); i <= bytes2.length - needle.length; i++) {
+    for (let k = 0; k < needle.length; k++) if (bytes2[i + k] !== needle[k]) continue outer;
+    return i;
+  }
+  return -1;
+}
+async function inflate(data) {
+  for (const format of ["deflate", "deflate-raw"]) {
+    try {
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream(format));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    } catch {
+    }
+  }
+  return null;
+}
+async function parsePdf(bytes2) {
+  const objects = /* @__PURE__ */ new Map();
+  const trailer = /* @__PURE__ */ new Map();
+  const fromObjectStreams = /* @__PURE__ */ new Set();
+  const text = latin1.decode(bytes2);
+  const objectPattern = /(\d+)\s+(\d+)\s+obj\b/g;
+  let match;
+  while (match = objectPattern.exec(text)) {
+    const lexer = new Lexer(bytes2, match.index + match[0].length);
+    const value = lexer.parse();
+    objects.set(Number(match[1]), value);
+  }
+  const trailerPattern = /trailer\b/g;
+  while (match = trailerPattern.exec(text)) {
+    const lexer = new Lexer(bytes2, match.index + 7);
+    const value = lexer.parse();
+    if (value.t === "dict") for (const [key, entry2] of Array.from(value.v.entries())) trailer.set(key, entry2);
+  }
+  for (const [, value] of Array.from(objects.entries())) {
+    const dict = value.t === "stream" ? value.dict : value.t === "dict" ? value.v : null;
+    if (!dict) continue;
+    const type = dict.get("Type");
+    if (type?.t === "name" && type.v === "XRef") {
+      for (const key of ["Root", "Info", "Encrypt"]) {
+        const entry2 = dict.get(key);
+        if (entry2 && !trailer.has(key)) trailer.set(key, entry2);
+      }
+    }
+  }
+  for (const [, value] of Array.from(objects.entries())) {
+    if (value.t !== "stream") continue;
+    const type = value.dict.get("Type");
+    if (type?.t !== "name" || type.v !== "ObjStm") continue;
+    const filter = value.dict.get("Filter");
+    const filterName = filter?.t === "name" ? filter.v : filter?.t === "arr" && filter.v[0]?.t === "name" ? filter.v[0].v : "";
+    const data = filterName === "FlateDecode" ? await inflate(value.data) : value.data;
+    if (!data) continue;
+    const count = value.dict.get("N");
+    const first = value.dict.get("First");
+    if (count?.t !== "num" || first?.t !== "num") continue;
+    const header = new Lexer(data, 0);
+    const pairs = [];
+    for (let i = 0; i < count.v; i++) {
+      const num = Number(header.readToken());
+      const offset = Number(header.readToken());
+      if (Number.isNaN(num) || Number.isNaN(offset)) break;
+      pairs.push({ num, offset });
+    }
+    for (const pair of pairs) {
+      const lexer = new Lexer(data, first.v + pair.offset);
+      objects.set(pair.num, lexer.parse());
+      fromObjectStreams.add(pair.num);
+    }
+  }
+  const revisions = (text.match(/%%EOF/g) ?? []).length;
+  return { objects, trailer, encrypted: trailer.has("Encrypt"), revisions, fromObjectStreams };
+}
+function dictOf(value) {
+  if (!value) return null;
+  if (value.t === "dict") return value.v;
+  if (value.t === "stream") return value.dict;
+  return null;
+}
+function pdfDateToIso(value) {
+  const match = /^D?:?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?/.exec(value);
+  if (!match) return value;
+  const [, y, mo = "01", d = "01", h = "00", mi = "00", s = "00"] = match;
+  return `${y}-${mo}-${d}T${h}:${mi}:${s}Z`;
+}
+function isoToPdfDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `D:${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`;
+}
+async function readPdf(bytes2) {
+  const values = {};
+  const findings = [];
+  if (latin1.decode(bytes2.subarray(0, 5)) !== "%PDF-") {
+    return { values, findings, error: "Das ist keine PDF-Datei." };
+  }
+  const doc = await parsePdf(bytes2);
+  if (doc.encrypted) {
+    return {
+      values,
+      findings: [
+        {
+          id: "encrypted",
+          label: "Verschl\xFCsselte PDF-Datei",
+          detail: "Verschl\xFCsselte PDFs werden nicht bearbeitet \u2014 ein Rettungsversuch w\xFCrde die Datei zerst\xF6ren. Bitte in einem PDF-Programm ohne Schutz neu speichern.",
+          severity: "hoch"
+        }
+      ],
+      error: "PDF ist verschl\xFCsselt."
+    };
+  }
+  const info = dictOf(resolve(doc, doc.trailer.get("Info")));
+  for (const field of PDF_FIELDS) {
+    const value = info?.get(field.key);
+    if (value?.t === "str") {
+      values[field.key] = field.key.endsWith("Date") ? pdfDateToIso(value.v) : decodePdfText(value.v);
+    } else {
+      values[field.key] = "";
+    }
+  }
+  if (info && Array.from(info.keys()).length > 0) {
+    const extra = Array.from(info.keys()).filter((key) => !PDF_FIELDS.some((f) => f.key === key));
+    if (extra.length > 0) {
+      findings.push({
+        id: "infoExtra",
+        label: `Zus\xE4tzliche Info-Eintr\xE4ge: ${extra.join(", ")}`,
+        detail: "Programme legen im Info-W\xF6rterbuch eigene Felder ab, etwa Bearbeiter oder interne Kennungen.",
+        severity: "mittel"
+      });
+    }
+  }
+  const root = dictOf(resolve(doc, doc.trailer.get("Root")));
+  if (root?.has("Metadata")) {
+    findings.push({
+      id: "xmp",
+      label: "XMP-Metadaten",
+      detail: "Der XMP-Block enth\xE4lt oft einen Bearbeitungsverlauf mit Programmen, Zeitstempeln und Dokument-IDs.",
+      severity: "mittel"
+    });
+  }
+  if (doc.revisions > 1) {
+    findings.push({
+      id: "revisions",
+      label: `${doc.revisions} gespeicherte Fassungen in einer Datei`,
+      detail: "PDFs wachsen beim Speichern an: \xE4ltere Fassungen bleiben vollst\xE4ndig erhalten und lassen sich wiederherstellen \u2014 samt Text, den jemand sp\xE4ter entfernt hat.",
+      severity: "hoch"
+    });
+  }
+  const names = dictOf(resolve(doc, root?.get("Names")));
+  if (names?.has("JavaScript") || hasKeyAnywhere(doc, "JS")) {
+    findings.push({
+      id: "javascript",
+      label: "Eingebettetes JavaScript",
+      detail: "Skripte im Dokument k\xF6nnen beim \xD6ffnen ausgef\xFChrt werden und sind ein Sicherheitsrisiko.",
+      severity: "hoch"
+    });
+  }
+  if (names?.has("EmbeddedFiles") || countEmbeddedFiles(doc) > 0) {
+    findings.push({
+      id: "embeddedFiles",
+      label: "Eingebettete Dateien",
+      detail: "Angeh\xE4ngte Dateien bringen ihre eigenen Metadaten mit und werden beim Lesen leicht \xFCbersehen.",
+      severity: "hoch"
+    });
+  }
+  const annotations = countAnnotations(doc);
+  if (annotations > 0) {
+    findings.push({
+      id: "annotations",
+      label: `${annotations} Anmerkung(en)`,
+      detail: "Kommentare, Notizen und Formularfelder enthalten Autorennamen und Zeitstempel.",
+      severity: "mittel"
+    });
+  }
+  const orphans = countUnreachable(doc);
+  if (orphans > 0) {
+    findings.push({
+      id: "orphans",
+      label: `${orphans} nicht mehr erreichbare Objekte`,
+      detail: "Diese Objekte geh\xF6ren zu keiner Seite mehr \u2014 typischerweise Reste gel\xF6schter Inhalte. Beim Neuschreiben fallen sie weg.",
+      severity: "mittel"
+    });
+  }
+  return { values, findings };
+}
+function decodePdfText(value) {
+  if (value.charCodeAt(0) === 254 && value.charCodeAt(1) === 255) {
+    let out = "";
+    for (let i = 2; i + 1 < value.length; i += 2) out += String.fromCharCode(value.charCodeAt(i) << 8 | value.charCodeAt(i + 1));
+    return out;
+  }
+  return value;
+}
+function countEmbeddedFiles(doc) {
+  let count = 0;
+  for (const [, value] of Array.from(doc.objects.entries())) {
+    const dict = dictOf(value);
+    if (!dict) continue;
+    const type = dict.get("Type");
+    const subtype = dict.get("Subtype");
+    if (type?.t === "name" && type.v === "EmbeddedFile") count++;
+    else if (subtype?.t === "name" && subtype.v === "FileAttachment") count++;
+  }
+  return count;
+}
+function hasKeyAnywhere(doc, key) {
+  const seen = /* @__PURE__ */ new Set();
+  const visit = (value, depth) => {
+    if (!value || depth > 32 || seen.has(value)) return false;
+    seen.add(value);
+    if (value.t === "arr") return value.v.some((item) => visit(item, depth + 1));
+    const dict = dictOf(value);
+    if (!dict) return false;
+    if (dict.has(key)) return true;
+    const subtype = dict.get("Subtype");
+    if (subtype?.t === "name" && subtype.v === key) return true;
+    return Array.from(dict.values()).some((entry2) => visit(entry2, depth + 1));
+  };
+  return Array.from(doc.objects.values()).some((value) => visit(value, 0));
+}
+function countAnnotations(doc) {
+  let count = 0;
+  for (const [, value] of Array.from(doc.objects.entries())) {
+    const dict = dictOf(value);
+    const type = dict?.get("Type");
+    if (type?.t === "name" && type.v === "Annot") count++;
+  }
+  return count;
+}
+function reachable(doc, roots) {
+  const seen = /* @__PURE__ */ new Set();
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const value = queue.pop();
+    if (value.t === "ref") {
+      if (seen.has(value.num)) continue;
+      seen.add(value.num);
+      const target = doc.objects.get(value.num);
+      if (target) queue.push(target);
+    } else if (value.t === "arr") {
+      queue.push(...value.v);
+    } else if (value.t === "dict") {
+      queue.push(...Array.from(value.v.values()));
+    } else if (value.t === "stream") {
+      queue.push(...Array.from(value.dict.values()));
+    }
+  }
+  return seen;
+}
+function countUnreachable(doc) {
+  const root = doc.trailer.get("Root");
+  if (!root) return 0;
+  const roots = [root, doc.trailer.get("Info")].filter(Boolean);
+  const live = reachable(doc, roots);
+  let count = 0;
+  for (const [num] of Array.from(doc.objects.entries())) {
+    if (!live.has(num)) count++;
+  }
+  return count;
+}
+async function cleanPdf(bytes2, values, options) {
+  const doc = await parsePdf(bytes2);
+  const steps = [];
+  if (doc.encrypted) return { bytes: bytes2, steps, error: "Verschl\xFCsselte PDFs werden nicht ver\xE4ndert." };
+  const rootRef = doc.trailer.get("Root");
+  if (!rootRef) return { bytes: bytes2, steps, error: "Im PDF wurde kein Dokumentkatalog gefunden \u2014 Bereinigung abgelehnt." };
+  const root = dictOf(resolve(doc, rootRef));
+  if (!root) return { bytes: bytes2, steps, error: "Der Dokumentkatalog ist unlesbar \u2014 Bereinigung abgelehnt." };
+  if (options.removeXmp && root.delete("Metadata")) steps.push("XMP-Metadaten entfernt");
+  if (options.removeJavaScript) {
+    const names = dictOf(resolve(doc, root.get("Names")));
+    let removed = names?.delete("JavaScript") ?? false;
+    const openAction = dictOf(resolve(doc, root.get("OpenAction")));
+    const actionType = openAction?.get("S");
+    if (openAction?.has("JS") || actionType?.t === "name" && actionType.v === "JavaScript") {
+      root.delete("OpenAction");
+      removed = true;
+    }
+    for (const [, value] of Array.from(doc.objects.entries())) {
+      const dict = dictOf(value);
+      if (dict?.delete("JS")) removed = true;
+    }
+    if (removed) steps.push("JavaScript entfernt");
+  }
+  if (options.removeEmbeddedFiles) {
+    const names = dictOf(resolve(doc, root.get("Names")));
+    let removed = names?.delete("EmbeddedFiles") ?? false;
+    for (const [, value] of Array.from(doc.objects.entries())) {
+      const dict = dictOf(value);
+      const annots = resolve(doc, dict?.get("Annots"));
+      if (!dict || annots?.t !== "arr") continue;
+      const kept = annots.v.filter((item) => {
+        const annot = dictOf(resolve(doc, item));
+        const subtype = annot?.get("Subtype");
+        return !(subtype?.t === "name" && subtype.v === "FileAttachment");
+      });
+      if (kept.length === annots.v.length) continue;
+      annots.v = kept;
+      removed = true;
+    }
+    if (removed) steps.push("Eingebettete Dateien entfernt");
+  }
+  if (options.removeAnnotations) {
+    let count = 0;
+    for (const [, value] of Array.from(doc.objects.entries())) {
+      const dict = dictOf(value);
+      const type = dict?.get("Type");
+      if (type?.t === "name" && type.v === "Page" && dict?.has("Annots")) {
+        dict.delete("Annots");
+        count++;
+      }
+    }
+    if (count > 0) steps.push(`Anmerkungen von ${count} Seite(n) entfernt`);
+  }
+  const infoEntries = /* @__PURE__ */ new Map();
+  for (const field of PDF_FIELDS) {
+    const value = (values[field.key] ?? "").trim();
+    if (value === "") continue;
+    infoEntries.set(field.key, { t: "str", v: field.key.endsWith("Date") ? isoToPdfDate(value) : value, hex: false });
+  }
+  const pagesBefore = countPages(doc);
+  const live = reachable(doc, [rootRef]);
+  const dropped = doc.objects.size - live.size;
+  if (dropped > 0 && options.dropOldRevisions) steps.push(`${dropped} nicht erreichbare Objekte weggelassen`);
+  if (doc.revisions > 1) steps.push(`${doc.revisions - 1} \xE4ltere Fassung(en) verworfen`);
+  const keep = options.dropOldRevisions ? live : new Set(Array.from(doc.objects.keys()));
+  const out = serialize(doc, keep, rootRef, infoEntries);
+  const check = await parsePdf(out);
+  const pagesAfter = countPages(check);
+  if (pagesBefore > 0 && pagesAfter !== pagesBefore) {
+    return {
+      bytes: bytes2,
+      steps,
+      error: `Sicherheitspr\xFCfung fehlgeschlagen: vorher ${pagesBefore} Seiten, nachher ${pagesAfter}. Die Datei wurde nicht ver\xE4ndert.`
+    };
+  }
+  if (infoEntries.size > 0) steps.push(`Info-W\xF6rterbuch neu geschrieben (${infoEntries.size} Feld(er))`);
+  else steps.push("Info-W\xF6rterbuch entfernt");
+  return { bytes: out, steps };
+}
+function countPages(doc) {
+  let count = 0;
+  for (const [, value] of Array.from(doc.objects.entries())) {
+    const dict = dictOf(value);
+    const type = dict?.get("Type");
+    if (type?.t === "name" && type.v === "Page") count++;
+  }
+  return count;
+}
+function serialize(doc, keep, rootRef, infoEntries) {
+  const chunks = [];
+  const encoder4 = new TextEncoder();
+  const push = (text) => chunks.push(encoder4.encode(text));
+  let offset = 0;
+  const offsets = /* @__PURE__ */ new Map();
+  const track = (chunk) => {
+    chunks.push(chunk);
+    offset += chunk.length;
+  };
+  const write = (text) => track(encoder4.encode(text));
+  write("%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
+  const numbers = Array.from(keep).sort((a, b) => a - b);
+  const maxNumber = numbers.length > 0 ? numbers[numbers.length - 1] : 0;
+  const infoNumber = maxNumber + 1;
+  for (const num of numbers) {
+    const value = doc.objects.get(num);
+    if (!value) continue;
+    const dict = dictOf(value);
+    const type = dict?.get("Type");
+    if (type?.t === "name" && (type.v === "ObjStm" || type.v === "XRef")) continue;
+    offsets.set(num, offset);
+    write(`${num} 0 obj
+`);
+    if (value.t === "stream") {
+      write(serializeValue({ t: "dict", v: withLength(value) }));
+      write("\nstream\n");
+      track(value.data);
+      write("\nendstream");
+    } else {
+      write(serializeValue(value));
+    }
+    write("\nendobj\n");
+  }
+  if (infoEntries.size > 0) {
+    offsets.set(infoNumber, offset);
+    write(`${infoNumber} 0 obj
+`);
+    write(serializeValue({ t: "dict", v: infoEntries }));
+    write("\nendobj\n");
+  }
+  const size = (infoEntries.size > 0 ? infoNumber : maxNumber) + 1;
+  const xrefOffset = offset;
+  write("xref\n");
+  write(`0 ${size}
+`);
+  write("0000000000 65535 f \n");
+  for (let num = 1; num < size; num++) {
+    const at2 = offsets.get(num);
+    write(at2 === void 0 ? "0000000000 65535 f \n" : `${String(at2).padStart(10, "0")} 00000 n 
+`);
+  }
+  const rootNumber = rootRef.t === "ref" ? rootRef.num : 0;
+  write("trailer\n");
+  write(`<< /Size ${size} /Root ${rootNumber} 0 R`);
+  if (infoEntries.size > 0) write(` /Info ${infoNumber} 0 R`);
+  write(" >>\n");
+  write(`startxref
+${xrefOffset}
+%%EOF
+`);
+  void push;
+  const total = chunks.reduce((sum, c) => sum + c.length, 0);
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.length;
+  }
+  return out;
+}
+function withLength(stream) {
+  const dict = new Map(stream.dict);
+  dict.set("Length", { t: "num", v: stream.data.length });
+  return dict;
+}
+function serializeValue(value) {
+  switch (value.t) {
+    case "num":
+      return Number.isInteger(value.v) ? String(value.v) : String(Number(value.v.toFixed(6)));
+    case "name":
+      return "/" + value.v.replace(/[^\x21-\x7e]|[#()<>[\]{}/%]/g, (c) => "#" + c.charCodeAt(0).toString(16).padStart(2, "0"));
+    case "bool":
+      return value.v ? "true" : "false";
+    case "null":
+      return "null";
+    case "ref":
+      return `${value.num} ${value.gen} R`;
+    case "str":
+      return serializeString(value.v);
+    case "arr":
+      return `[ ${value.v.map(serializeValue).join(" ")} ]`;
+    case "dict":
+      return `<< ${Array.from(value.v.entries()).map(([key, entry2]) => `${serializeValue({ t: "name", v: key })} ${serializeValue(entry2)}`).join(" ")} >>`;
+    case "stream":
+      return serializeValue({ t: "dict", v: value.dict });
+  }
+}
+function serializeString(value) {
+  const needsUtf16 = /[^\x20-\x7e]/.test(value);
+  if (needsUtf16) {
+    let hex = "FEFF";
+    for (const char of value) {
+      const code = char.codePointAt(0) ?? 0;
+      hex += code.toString(16).padStart(4, "0").toUpperCase();
+    }
+    return `<${hex}>`;
+  }
+  return `(${value.replace(/[\\()]/g, (c) => "\\" + c)})`;
+}
+var DEFAULT_PDF_CLEAN, PDF_FIELDS, isWhite, isDelim, latin1, Lexer, decodeName, resolve;
+var init_pdf = __esm({
+  "lib/pdf.ts"() {
+    "use strict";
+    DEFAULT_PDF_CLEAN = {
+      removeXmp: true,
+      removeJavaScript: true,
+      removeEmbeddedFiles: true,
+      removeAnnotations: false,
+      dropOldRevisions: true
+    };
+    PDF_FIELDS = [
+      { key: "Title", label: "Titel" },
+      { key: "Subject", label: "Thema" },
+      { key: "Author", label: "Autor" },
+      { key: "Keywords", label: "Stichw\xF6rter" },
+      { key: "Creator", label: "Erstellt mit" },
+      { key: "Producer", label: "PDF-Erzeuger" },
+      { key: "CreationDate", label: "Erstellt am" },
+      { key: "ModDate", label: "Ge\xE4ndert am" }
+    ];
+    isWhite = (c) => c === 32 || c === 10 || c === 13 || c === 9 || c === 12 || c === 0;
+    isDelim = (c) => [40, 41, 60, 62, 91, 93, 123, 125, 47, 37].includes(c);
+    latin1 = new TextDecoder("latin1");
+    Lexer = class {
+      constructor(bytes2, pos = 0) {
+        this.bytes = bytes2;
+        this.pos = pos;
+      }
+      skip() {
+        while (this.pos < this.bytes.length) {
+          const c = this.bytes[this.pos];
+          if (isWhite(c)) this.pos++;
+          else if (c === 37) {
+            while (this.pos < this.bytes.length && this.bytes[this.pos] !== 10) this.pos++;
+          } else break;
+        }
+      }
+      peekKeyword(word) {
+        this.skip();
+        return latin1.decode(this.bytes.subarray(this.pos, this.pos + word.length)) === word;
+      }
+      readToken() {
+        this.skip();
+        const start = this.pos;
+        while (this.pos < this.bytes.length && !isWhite(this.bytes[this.pos]) && !isDelim(this.bytes[this.pos])) this.pos++;
+        if (this.pos === start) this.pos++;
+        return latin1.decode(this.bytes.subarray(start, this.pos));
+      }
+      parse(depth = 0) {
+        this.skip();
+        if (this.pos >= this.bytes.length || depth > 64) return { t: "null" };
+        const c = this.bytes[this.pos];
+        if (c === 47) {
+          this.pos++;
+          const start = this.pos;
+          while (this.pos < this.bytes.length && !isWhite(this.bytes[this.pos]) && !isDelim(this.bytes[this.pos])) this.pos++;
+          return { t: "name", v: decodeName(latin1.decode(this.bytes.subarray(start, this.pos))) };
+        }
+        if (c === 40) return this.parseLiteralString();
+        if (c === 60) {
+          if (this.bytes[this.pos + 1] === 60) return this.parseDict(depth);
+          return this.parseHexString();
+        }
+        if (c === 91) {
+          this.pos++;
+          const items = [];
+          while (this.pos < this.bytes.length) {
+            this.skip();
+            if (this.bytes[this.pos] === 93) {
+              this.pos++;
+              break;
+            }
+            const before = this.pos;
+            items.push(this.parse(depth + 1));
+            if (this.pos === before) {
+              this.pos++;
+              break;
+            }
+          }
+          return { t: "arr", v: items };
+        }
+        if (c === 93 || c === 62 || c === 41 || c === 125) {
+          this.pos++;
+          return { t: "null" };
+        }
+        const token = this.readToken();
+        if (token === "true") return { t: "bool", v: true };
+        if (token === "false") return { t: "bool", v: false };
+        if (token === "null" || token === "") return { t: "null" };
+        if (/^[+-]?[\d.]+$/.test(token)) {
+          const save = this.pos;
+          if (/^\d+$/.test(token)) {
+            const gen = this.readToken();
+            if (/^\d+$/.test(gen)) {
+              const keyword = this.readToken();
+              if (keyword === "R") return { t: "ref", num: Number(token), gen: Number(gen) };
+            }
+            this.pos = save;
+          }
+          return { t: "num", v: Number(token) };
+        }
+        return { t: "null" };
+      }
+      parseDict(depth) {
+        this.pos += 2;
+        const map = /* @__PURE__ */ new Map();
+        while (this.pos < this.bytes.length) {
+          this.skip();
+          if (this.bytes[this.pos] === 62 && this.bytes[this.pos + 1] === 62) {
+            this.pos += 2;
+            break;
+          }
+          const key = this.parse(depth + 1);
+          if (key.t !== "name") {
+            if (this.pos >= this.bytes.length) break;
+            continue;
+          }
+          map.set(key.v, this.parse(depth + 1));
+        }
+        const save = this.pos;
+        this.skip();
+        if (latin1.decode(this.bytes.subarray(this.pos, this.pos + 6)) === "stream") {
+          this.pos += 6;
+          if (this.bytes[this.pos] === 13) this.pos++;
+          if (this.bytes[this.pos] === 10) this.pos++;
+          const start = this.pos;
+          const declared = map.get("Length");
+          let end = declared?.t === "num" ? start + declared.v : -1;
+          if (end < 0 || end > this.bytes.length || !endsWithEndstream(this.bytes, end)) {
+            end = indexOfSequence(this.bytes, "endstream", start);
+            if (end < 0) end = this.bytes.length;
+            while (end > start && isWhite(this.bytes[end - 1])) end--;
+          }
+          const data = this.bytes.subarray(start, end);
+          this.pos = Math.min(this.bytes.length, indexOfSequence(this.bytes, "endstream", end) + 9);
+          return { t: "stream", dict: map, data };
+        }
+        this.pos = save;
+        return { t: "dict", v: map };
+      }
+      parseLiteralString() {
+        this.pos++;
+        let depth = 1;
+        let out = "";
+        while (this.pos < this.bytes.length) {
+          const c = this.bytes[this.pos++];
+          if (c === 92) {
+            out += String.fromCharCode(this.bytes[this.pos++]);
+            continue;
+          }
+          if (c === 40) depth++;
+          if (c === 41) {
+            depth--;
+            if (depth === 0) break;
+          }
+          out += String.fromCharCode(c);
+        }
+        return { t: "str", v: out, hex: false };
+      }
+      parseHexString() {
+        this.pos++;
+        let hex = "";
+        while (this.pos < this.bytes.length && this.bytes[this.pos] !== 62) {
+          const c = String.fromCharCode(this.bytes[this.pos++]);
+          if (/[0-9a-fA-F]/.test(c)) hex += c;
+        }
+        this.pos++;
+        let out = "";
+        for (let i = 0; i < hex.length; i += 2) out += String.fromCharCode(parseInt(hex.substr(i, 2).padEnd(2, "0"), 16));
+        return { t: "str", v: out, hex: true };
+      }
+    };
+    decodeName = (name) => name.replace(/#([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+    resolve = (doc, value) => value?.t === "ref" ? doc.objects.get(value.num) : value;
+  }
+});
+
+// lib/rtf.ts
+function groupEnd(text, start) {
+  let depth = 0;
+  for (let i = start; i < text.length; i++) {
+    const char = text[i];
+    if (char === "\\") {
+      i++;
+      continue;
+    }
+    if (char === "{") depth++;
+    else if (char === "}") {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return text.length;
+}
+function findGroup(text, control) {
+  const marker = `{\\${control}`;
+  const start = text.indexOf(marker);
+  if (start < 0) return null;
+  const next = text[start + marker.length];
+  if (next && /[a-z0-9]/i.test(next)) return null;
+  return { start, end: groupEnd(text, start) };
+}
+function readRtfFields(text) {
+  const values = {};
+  const info = findGroup(text, "info");
+  if (!info) return values;
+  const block = text.slice(info.start, info.end);
+  for (const field of RTF_FIELDS) {
+    if (field.kind === "number") {
+      const match = new RegExp(`\\\\${field.control}(-?\\d+)`).exec(block);
+      values[field.key] = match ? match[1] : "";
+      continue;
+    }
+    const group = findGroup(block, field.control);
+    if (!group) {
+      values[field.key] = "";
+      continue;
+    }
+    const inner = block.slice(group.start, group.end).replace(new RegExp(`^\\{\\\\${field.control}\\s?`), "").replace(/\}$/, "");
+    values[field.key] = decodeRtfText(inner);
+  }
+  return values;
+}
+function decodeRtfText(input) {
+  let out = "";
+  let i = 0;
+  while (i < input.length) {
+    const char = input[i];
+    if (char !== "\\") {
+      out += char;
+      i++;
+      continue;
+    }
+    const next = input[i + 1];
+    if (next === "\\" || next === "{" || next === "}") {
+      out += next;
+      i += 2;
+      continue;
+    }
+    if (next === "'") {
+      out += String.fromCharCode(parseInt(input.substr(i + 2, 2), 16));
+      i += 4;
+      continue;
+    }
+    const unicode = /^\\u(-?\d+)\s?\??/.exec(input.slice(i));
+    if (unicode) {
+      const code = Number(unicode[1]);
+      out += String.fromCharCode(code < 0 ? code + 65536 : code);
+      i += unicode[0].length;
+      continue;
+    }
+    const control = /^\\([a-z]+)(-?\d+)?\s?/i.exec(input.slice(i));
+    if (control) {
+      i += control[0].length;
+      continue;
+    }
+    i += 2;
+  }
+  return out.trim();
+}
+function escapeRtf(value) {
+  return value.replace(/[\\{}]/g, (char) => `\\${char}`).replace(/[^\x20-\x7e]/g, (char) => `\\u${char.charCodeAt(0)}?`);
+}
+function writeRtfFields(text, values) {
+  const parts = [];
+  for (const field of RTF_FIELDS) {
+    const value = (values[field.key] ?? "").trim();
+    if (value === "") continue;
+    if (field.kind === "number") {
+      if (/^-?\d+$/.test(value)) parts.push(`\\${field.control}${value}`);
+    } else {
+      parts.push(`{\\${field.control} ${escapeRtf(value)}}`);
+    }
+  }
+  const info = parts.length > 0 ? `{\\info${parts.join("")}}` : "";
+  const existing = findGroup(text, "info");
+  if (existing) return text.slice(0, existing.start) + info + text.slice(existing.end);
+  if (!info) return text;
+  const insertAt = text.indexOf("{\\fonttbl") >= 0 ? text.indexOf("{\\fonttbl") : text.indexOf("}") + 1;
+  return text.slice(0, insertAt) + info + text.slice(insertAt);
+}
+function scanRtf(text) {
+  const findings = [];
+  const revisionAuthors = collectRevisionAuthors(text);
+  if (revisionAuthors.length > 0) {
+    findings.push({
+      id: "authors",
+      label: `${revisionAuthors.length} Name(n) in der Revisionstabelle`,
+      detail: `Gefunden: ${revisionAuthors.join(", ")}. RTF f\xFChrt jede Person, die je im Dokument gespeichert hat.`,
+      severity: "hoch"
+    });
+  }
+  if (/\\\*\\generator/.test(text)) {
+    findings.push({
+      id: "generator",
+      label: "Erzeugerkennung",
+      detail: "Nennt Programm und Version, mit denen die Datei geschrieben wurde.",
+      severity: "niedrig"
+    });
+  }
+  if (/\\\*\\atnauthor|\\annotation/.test(text)) {
+    findings.push({
+      id: "annotations",
+      label: "Kommentare mit Autorennamen",
+      detail: "RTF speichert Kommentarautoren im Klartext neben dem Text.",
+      severity: "hoch"
+    });
+  }
+  if (/\\revised|\\deleted/.test(text)) {
+    findings.push({
+      id: "trackedChanges",
+      label: "Nachverfolgte \xC4nderungen",
+      detail: "Gel\xF6schter Text bleibt als \\deleted im Dokument stehen und ist lesbar.",
+      severity: "hoch"
+    });
+  }
+  return findings;
+}
+function collectRevisionAuthors(text) {
+  const table = findGroup(text, "*\\revtbl");
+  const authors = /* @__PURE__ */ new Set();
+  if (table) {
+    const block = text.slice(table.start, table.end);
+    for (const match of Array.from(block.matchAll(/\{([^{}\\;]+);?\}/g))) {
+      const name = match[1].trim();
+      if (name && name !== "Unknown") authors.add(name);
+    }
+  }
+  for (const match of Array.from(text.matchAll(/\\\*\\atnauthor\s+([^\\{}]+)/g))) {
+    const name = match[1].trim();
+    if (name) authors.add(name);
+  }
+  return Array.from(authors);
+}
+function cleanRtf(text, options) {
+  let out = text;
+  const steps = [];
+  if (options.removeGenerator) {
+    const generator = findGroup(out, "*\\generator");
+    if (generator) {
+      out = out.slice(0, generator.start) + out.slice(generator.end);
+      steps.push("Erzeugerkennung entfernt");
+    }
+  }
+  if (options.removeRevisionTable) {
+    const table = findGroup(out, "*\\revtbl");
+    if (table) {
+      out = out.slice(0, table.start) + out.slice(table.end);
+      steps.push("Revisionstabelle entfernt");
+    }
+  }
+  if (options.anonymizeAuthors) {
+    const authors = collectRevisionAuthors(out).filter((name) => !/^Autor \d+$/.test(name));
+    if (authors.length > 0) {
+      authors.forEach((name, index) => {
+        const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        out = out.replace(new RegExp(`(\\\\\\*\\\\atnauthor\\s+)${escaped}`, "g"), `$1Autor ${index + 1}`);
+      });
+      steps.push(`${authors.length} Name(n) in Kommentaren ersetzt`);
+    }
+  }
+  return { text: out, steps };
+}
+var RTF_FIELDS, isRtf, DEFAULT_RTF_CLEAN;
+var init_rtf = __esm({
+  "lib/rtf.ts"() {
+    "use strict";
+    RTF_FIELDS = [
+      { key: "title", label: "Titel", control: "title", kind: "text" },
+      { key: "subject", label: "Thema", control: "subject", kind: "text" },
+      { key: "author", label: "Autor", control: "author", kind: "text" },
+      { key: "operator", label: "Zuletzt ge\xE4ndert von", control: "operator", kind: "text" },
+      { key: "keywords", label: "Stichw\xF6rter", control: "keywords", kind: "text" },
+      { key: "comment", label: "Kommentare", control: "doccomm", kind: "text" },
+      { key: "company", label: "Firma", control: "company", kind: "text" },
+      { key: "category", label: "Kategorie", control: "category", kind: "text" },
+      { key: "manager", label: "Vorgesetzter", control: "manager", kind: "text" },
+      { key: "version", label: "Version", control: "vern", kind: "number" },
+      { key: "editingTime", label: "Bearbeitungszeit (Min.)", control: "edmins", kind: "number" },
+      { key: "revisions", label: "Revisionsnummer", control: "nofrev", kind: "number" }
+    ];
+    isRtf = (text) => text.trimStart().startsWith("{\\rtf");
+    DEFAULT_RTF_CLEAN = {
+      removeGenerator: true,
+      removeRevisionTable: true,
+      anonymizeAuthors: false
+    };
+  }
+});
+
+// lib/ole2.ts
+function readCompound(bytes2) {
+  if (!isOle2(bytes2) || bytes2.length < 512) return null;
+  const view = new DataView(bytes2.buffer, bytes2.byteOffset, bytes2.byteLength);
+  const sectorSize = 1 << view.getUint16(30, true);
+  const miniSectorSize = 1 << view.getUint16(32, true);
+  const directoryStart = view.getUint32(48, true);
+  const miniCutoff = view.getUint32(56, true);
+  const miniFatStart = view.getUint32(60, true);
+  const difatStart = view.getUint32(68, true);
+  const sectorOffset = (sector) => (sector + 1) * sectorSize;
+  const sectorEnd = (sector) => sectorOffset(sector) + sectorSize;
+  if (sectorSize < 128) return null;
+  const fatSectors = [];
+  for (let i = 0; i < 109; i++) {
+    const sector = view.getUint32(76 + i * 4, true);
+    if (sector === 4294967295) break;
+    fatSectors.push(sector);
+  }
+  let difat = difatStart;
+  let guard = 0;
+  while (difat !== 4294967295 && difat !== 4294967294 && guard++ < 1024) {
+    const base = sectorOffset(difat);
+    if (base + sectorSize > bytes2.length) break;
+    const perSector = sectorSize / 4 - 1;
+    for (let i = 0; i < perSector; i++) {
+      const sector = view.getUint32(base + i * 4, true);
+      if (sector === 4294967295) break;
+      fatSectors.push(sector);
+    }
+    difat = view.getUint32(base + sectorSize - 4, true);
+  }
+  const fat = [];
+  for (const sector of fatSectors) {
+    const base = sectorOffset(sector);
+    if (base + sectorSize > bytes2.length) break;
+    for (let i = 0; i < sectorSize / 4; i++) fat.push(view.getUint32(base + i * 4, true));
+  }
+  if (fat.length === 0) return null;
+  const chain = (start, limit = 1 << 20) => {
+    const out = [];
+    let sector = start;
+    while (sector !== 4294967294 && sector !== 4294967295 && out.length < limit) {
+      if (sector < 0 || sector >= fat.length) break;
+      out.push(sector);
+      sector = fat[sector];
+    }
+    return out;
+  };
+  const miniFat = [];
+  for (const sector of chain(miniFatStart)) {
+    const base = sectorOffset(sector);
+    if (base + sectorSize > bytes2.length) break;
+    for (let i = 0; i < sectorSize / 4; i++) miniFat.push(view.getUint32(base + i * 4, true));
+  }
+  const directorySectors = chain(directoryStart);
+  const entries = [];
+  for (const sector of directorySectors) {
+    const base = sectorOffset(sector);
+    for (let offset = base; offset + 128 <= base + sectorSize && offset + 128 <= bytes2.length; offset += 128) {
+      const nameLength = view.getUint16(offset + 64, true);
+      if (nameLength < 2) continue;
+      let name = "";
+      for (let i = 0; i < nameLength - 2; i += 2) name += String.fromCharCode(view.getUint16(offset + i, true));
+      entries.push({
+        name,
+        type: bytes2[offset + 66],
+        start: view.getUint32(offset + 116, true),
+        size: view.getUint32(offset + 120, true)
+      });
+    }
+  }
+  const root = entries.find((e) => e.type === 5);
+  const miniStreamSectors = root ? chain(root.start) : [];
+  const streams = /* @__PURE__ */ new Map();
+  for (const item of entries) {
+    if (item.type !== 2) continue;
+    const ranges = [];
+    if (item.size < miniCutoff) {
+      let mini = item.start;
+      let count = 0;
+      while (mini !== 4294967294 && mini !== 4294967295 && count++ < 1 << 16) {
+        const byteOffset = mini * miniSectorSize;
+        const hostIndex = Math.floor(byteOffset / sectorSize);
+        const hostSector = miniStreamSectors[hostIndex];
+        if (hostSector === void 0) break;
+        const start = sectorOffset(hostSector) + byteOffset % sectorSize;
+        ranges.push({ start, end: start + miniSectorSize });
+        if (mini >= miniFat.length) break;
+        mini = miniFat[mini];
+      }
+    } else {
+      for (const sector of chain(item.start)) ranges.push({ start: sectorOffset(sector), end: sectorEnd(sector) });
+    }
+    if (ranges.length > 0) streams.set(item.name, { name: item.name, ranges, size: item.size });
+  }
+  return { streams };
+}
+function readStream(bytes2, location) {
+  const out = new Uint8Array(location.ranges.reduce((sum, r) => sum + (r.end - r.start), 0));
+  let offset = 0;
+  for (const range of location.ranges) {
+    const slice = bytes2.subarray(range.start, Math.min(range.end, bytes2.length));
+    out.set(slice, offset);
+    offset += range.end - range.start;
+  }
+  return out.subarray(0, Math.max(location.size, 0) || out.length);
+}
+function writeStream(bytes2, location, data) {
+  const capacity = location.ranges.reduce((sum, r) => sum + (r.end - r.start), 0);
+  if (data.length > capacity) return false;
+  let offset = 0;
+  for (const range of location.ranges) {
+    const length = range.end - range.start;
+    for (let i = 0; i < length; i++) {
+      const target = range.start + i;
+      if (target >= bytes2.length) break;
+      bytes2[target] = offset + i < data.length ? data[offset + i] : 0;
+    }
+    offset += length;
+  }
+  return true;
+}
+function parsePropertySet(stream) {
+  const values = /* @__PURE__ */ new Map();
+  if (stream.length < 48) return values;
+  const view = new DataView(stream.buffer, stream.byteOffset, stream.byteLength);
+  if (view.getUint16(0, true) !== 65534) return values;
+  const sectionOffset = view.getUint32(44, true);
+  if (sectionOffset + 8 > stream.length) return values;
+  const count = view.getUint32(sectionOffset + 4, true);
+  for (let i = 0; i < count && i < 256; i++) {
+    const entry2 = sectionOffset + 8 + i * 8;
+    if (entry2 + 8 > stream.length) break;
+    const id = view.getUint32(entry2, true);
+    const offset = sectionOffset + view.getUint32(entry2 + 4, true);
+    if (offset + 4 > stream.length) continue;
+    const type = view.getUint32(offset, true);
+    if (type === VT_LPSTR || type === 31) {
+      const length = view.getUint32(offset + 4, true);
+      if (offset + 8 + length > stream.length) continue;
+      const raw = stream.subarray(offset + 8, offset + 8 + length);
+      const text = type === 31 ? Array.from({ length: Math.floor(length / 2) }, (_, k) => String.fromCharCode(view.getUint16(offset + 8 + k * 2, true))).join("") : new TextDecoder("windows-1252").decode(raw);
+      values.set(id, text.replace(/\0.*$/, ""));
+    } else if (type === VT_I4) {
+      values.set(id, view.getInt32(offset + 4, true));
+    } else if (type === VT_FILETIME) {
+      const low = view.getUint32(offset + 4, true);
+      const high = view.getUint32(offset + 8, true);
+      const ticks = high * 4294967296 + low;
+      if (ticks > 0) values.set(id, new Date(ticks / 1e4 + FILETIME_EPOCH));
+    }
+  }
+  return values;
+}
+function buildPropertySet(fmtid, values) {
+  const encoder4 = new TextEncoder();
+  const properties = [];
+  const codePage = new Uint8Array(8);
+  new DataView(codePage.buffer).setUint32(0, 2, true);
+  new DataView(codePage.buffer).setUint16(4, 65001, true);
+  properties.push({ id: 1, body: codePage });
+  for (const [id, value] of Array.from(values.entries())) {
+    if (id === 1) continue;
+    if (typeof value === "string") {
+      if (value === "") continue;
+      const text = encoder4.encode(value + "\0");
+      const padded = Math.ceil(text.length / 4) * 4;
+      const body = new Uint8Array(8 + padded);
+      const view2 = new DataView(body.buffer);
+      view2.setUint32(0, VT_LPSTR, true);
+      view2.setUint32(4, text.length, true);
+      body.set(text, 8);
+      properties.push({ id, body });
+    } else if (typeof value === "number") {
+      const body = new Uint8Array(8);
+      const view2 = new DataView(body.buffer);
+      view2.setUint32(0, VT_I4, true);
+      view2.setInt32(4, value, true);
+      properties.push({ id, body });
+    } else if (value instanceof Date) {
+      const body = new Uint8Array(12);
+      const view2 = new DataView(body.buffer);
+      view2.setUint32(0, VT_FILETIME, true);
+      const ticks = (value.getTime() - FILETIME_EPOCH) * 1e4;
+      view2.setUint32(4, ticks % 4294967296, true);
+      view2.setUint32(8, Math.floor(ticks / 4294967296), true);
+      properties.push({ id, body });
+    }
+  }
+  const tableSize = 8 + properties.length * 8;
+  const sectionSize = tableSize + properties.reduce((sum, p) => sum + p.body.length, 0);
+  const out = new Uint8Array(48 + sectionSize);
+  const view = new DataView(out.buffer);
+  view.setUint16(0, 65534, true);
+  view.setUint16(2, 0, true);
+  view.setUint32(4, 131078, true);
+  out.set(uuidToBytes("00000000-0000-0000-0000-000000000000"), 8);
+  view.setUint32(24, 1, true);
+  out.set(uuidToBytes(fmtid), 28);
+  view.setUint32(44, 48, true);
+  view.setUint32(48, sectionSize, true);
+  view.setUint32(52, properties.length, true);
+  let valueOffset = tableSize;
+  properties.forEach((property, index) => {
+    view.setUint32(56 + index * 8, property.id, true);
+    view.setUint32(56 + index * 8 + 4, valueOffset, true);
+    out.set(property.body, 48 + valueOffset);
+    valueOffset += property.body.length;
+  });
+  return out;
+}
+function uuidToBytes(uuid) {
+  const hex = uuid.replace(/-/g, "");
+  const bytes2 = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) bytes2[i] = parseInt(hex.substr(i * 2, 2), 16);
+  const swap = (a, b) => {
+    const tmp = bytes2[a];
+    bytes2[a] = bytes2[b];
+    bytes2[b] = tmp;
+  };
+  swap(0, 3);
+  swap(1, 2);
+  swap(4, 5);
+  swap(6, 7);
+  return bytes2;
+}
+function readOle2(bytes2) {
+  const compound = readCompound(bytes2);
+  if (!compound) return null;
+  const summary = compound.streams.get(SUMMARY);
+  const docSummary = compound.streams.get(DOC_SUMMARY);
+  const summaryValues = summary ? parsePropertySet(readStream(bytes2, summary)) : /* @__PURE__ */ new Map();
+  const docValues = docSummary ? parsePropertySet(readStream(bytes2, docSummary)) : /* @__PURE__ */ new Map();
+  const values = {};
+  for (const field of OLE2_FIELDS) {
+    const source = field.stream === "summary" ? summaryValues : docValues;
+    const value = source.get(field.id);
+    if (value === void 0) values[field.key] = "";
+    else if (value instanceof Date) values[field.key] = value.toISOString().replace(/\.\d{3}Z$/, "Z");
+    else values[field.key] = String(value);
+  }
+  const findings = [];
+  const streamNames = Array.from(compound.streams.keys());
+  findings.push({
+    id: "legacyFormat",
+    label: "Altes Bin\xE4rformat",
+    detail: 'Diese Formate speichern beim \u201Eschnellen Speichern" gel\xF6schten Text weiter in der Datei. Das l\xE4sst sich nicht zuverl\xE4ssig entfernen \u2014 f\xFCr heikle Dokumente in Word \xF6ffnen und als .docx neu speichern.',
+    severity: "hoch"
+  });
+  if (streamNames.some((n) => /Macros|VBA|_VBA_PROJECT/i.test(n))) {
+    findings.push({
+      id: "macros",
+      label: "Makros (VBA-Projekt)",
+      detail: "Das VBA-Projekt enth\xE4lt Quellcode samt Autorenspuren. Entfernen geht in dieser Datei nur \xFCber Office.",
+      severity: "mittel"
+    });
+  }
+  if (streamNames.some((n) => /ObjectPool|Ole/i.test(n))) {
+    findings.push({
+      id: "oleObjects",
+      label: "Eingebettete Objekte",
+      detail: "Eingebettete Fremddokumente bringen eigene Metadaten mit.",
+      severity: "mittel"
+    });
+  }
+  return { values, findings };
+}
+function writeOle2(bytes2, values) {
+  const compound = readCompound(bytes2);
+  if (!compound) return { bytes: bytes2, steps: [], error: "Datei ist kein g\xFCltiges OLE2-Dokument." };
+  const out = bytes2.slice();
+  const steps = [];
+  for (const [streamName, fmtid, group] of [
+    [SUMMARY, FMTID_SUMMARY, "summary"],
+    [DOC_SUMMARY, FMTID_DOC_SUMMARY, "docSummary"]
+  ]) {
+    const location = compound.streams.get(streamName);
+    if (!location) continue;
+    const properties = /* @__PURE__ */ new Map();
+    for (const field of OLE2_FIELDS.filter((f) => f.stream === group)) {
+      const value = (values[field.key] ?? "").trim();
+      if (value === "") continue;
+      if (field.kind === "number") {
+        if (/^-?\d+$/.test(value)) properties.set(field.id, Number(value));
+      } else if (field.kind === "datetime") {
+        const date = new Date(value);
+        if (!Number.isNaN(date.getTime())) properties.set(field.id, date);
+      } else {
+        properties.set(field.id, value);
+      }
+    }
+    const built = buildPropertySet(fmtid, properties);
+    if (!writeStream(out, location, built)) {
+      return {
+        bytes: bytes2,
+        steps,
+        error: "Die neuen Werte brauchen mehr Platz, als das alte Format in dieser Datei vorsieht. K\xFCrzere Texte verwenden oder die Datei als .docx/.xlsx speichern."
+      };
+    }
+    steps.push(`${streamName.slice(1)} neu geschrieben (${properties.size} Eigenschaft(en))`);
+  }
+  return { bytes: out, steps };
+}
+var SIGNATURE, SUMMARY, DOC_SUMMARY, FMTID_SUMMARY, FMTID_DOC_SUMMARY, VT_I4, VT_LPSTR, VT_FILETIME, OLE2_FIELDS, isOle2, FILETIME_EPOCH;
+var init_ole2 = __esm({
+  "lib/ole2.ts"() {
+    "use strict";
+    SIGNATURE = [208, 207, 17, 224, 161, 177, 26, 225];
+    SUMMARY = "SummaryInformation";
+    DOC_SUMMARY = "DocumentSummaryInformation";
+    FMTID_SUMMARY = "f29f85e0-4ff9-1068-ab91-08002b27b3d9";
+    FMTID_DOC_SUMMARY = "d5cdd502-2e9c-101b-9397-08002b2cf9ae";
+    VT_I4 = 3;
+    VT_LPSTR = 30;
+    VT_FILETIME = 64;
+    OLE2_FIELDS = [
+      { key: "title", label: "Titel", stream: "summary", id: 2, kind: "text" },
+      { key: "subject", label: "Thema", stream: "summary", id: 3, kind: "text" },
+      { key: "creator", label: "Autor", stream: "summary", id: 4, kind: "text" },
+      { key: "keywords", label: "Stichw\xF6rter", stream: "summary", id: 5, kind: "text" },
+      { key: "description", label: "Kommentare", stream: "summary", id: 6, kind: "text" },
+      { key: "template", label: "Vorlage", stream: "summary", id: 7, kind: "text" },
+      { key: "lastModifiedBy", label: "Zuletzt ge\xE4ndert von", stream: "summary", id: 8, kind: "text" },
+      { key: "revision", label: "Revisionsnummer", stream: "summary", id: 9, kind: "text" },
+      { key: "TotalTime", label: "Bearbeitungszeit (Min.)", stream: "summary", id: 10, kind: "number" },
+      { key: "lastPrinted", label: "Zuletzt gedruckt", stream: "summary", id: 11, kind: "datetime" },
+      { key: "created", label: "Erstellt am", stream: "summary", id: 12, kind: "datetime" },
+      { key: "modified", label: "Ge\xE4ndert am", stream: "summary", id: 13, kind: "datetime" },
+      { key: "Application", label: "Erstellt mit", stream: "summary", id: 18, kind: "text" },
+      { key: "category", label: "Kategorie", stream: "docSummary", id: 2, kind: "text" },
+      { key: "Manager", label: "Vorgesetzter", stream: "docSummary", id: 14, kind: "text" },
+      { key: "Company", label: "Firma", stream: "docSummary", id: 15, kind: "text" }
+    ];
+    isOle2 = (bytes2) => SIGNATURE.every((byte, index) => bytes2[index] === byte);
+    FILETIME_EPOCH = -116444736e5;
+  }
+});
+
+// lib/mediaMeta.ts
+function detectMedia(bytes2) {
+  if (bytes2.length > 12 && fourcc(bytes2, 4) === "ftyp") return "mp4";
+  if (bytes2.length > 10 && dec2.decode(bytes2.subarray(0, 3)) === "ID3") return "mp3";
+  if (bytes2.length > 2 && bytes2[0] === 255 && (bytes2[1] & 224) === 224) return "mp3";
+  return "unknown";
+}
+function syncSafe(bytes2, at) {
+  return bytes2[at] << 21 | bytes2[at + 1] << 14 | bytes2[at + 2] << 7 | bytes2[at + 3];
+}
+function id3v2Length(bytes2) {
+  if (bytes2.length < 10 || dec2.decode(bytes2.subarray(0, 3)) !== "ID3") return 0;
+  const footer = (bytes2[5] & 16) !== 0 ? 10 : 0;
+  return 10 + syncSafe(bytes2, 6) + footer;
+}
+function inspectMedia(bytes2) {
+  const findings = [];
+  const format = detectMedia(bytes2);
+  if (format === "mp3") {
+    const length = id3v2Length(bytes2);
+    if (length > 0) {
+      findings.push({ label: "ID3v2-Tag", value: `${Math.round(length / 1024)} KB` });
+      const head = dec2.decode(bytes2.subarray(0, Math.min(length, 4096)));
+      if (/TPE1|TCOM|TOPE/.test(head)) findings.push({ label: "Interpret-/Urheberangaben" });
+      if (/COMM|TXXX/.test(head)) findings.push({ label: "Freitext-Kommentare" });
+      if (/PRIV/.test(head)) findings.push({ label: "Programmspezifische Daten (PRIV)" });
+    }
+    if (hasId3v1(bytes2)) findings.push({ label: "ID3v1-Tag" });
+    return findings;
+  }
+  if (format === "mp4") {
+    for (const box of findBoxes(bytes2)) {
+      if (box.type === "udta") findings.push({ label: "Benutzerdaten (udta)" });
+      else if (box.type === "meta") findings.push({ label: "Metadaten-Box (meta)" });
+      else if (box.type === "uuid") findings.push({ label: "XMP-Block" });
+      const text = dec2.decode(bytes2.subarray(box.start, Math.min(box.end, box.start + 2048)));
+      if (/©xyz|loci/.test(text)) findings.push({ label: "GPS-Position" });
+      if (/©too|©swr/.test(text)) findings.push({ label: "Aufnahme-Software" });
+    }
+    const seen = /* @__PURE__ */ new Set();
+    return findings.filter((f) => seen.has(f.label) ? false : (seen.add(f.label), true));
+  }
+  return findings;
+}
+function findBoxes(bytes2) {
+  const view = new DataView(bytes2.buffer, bytes2.byteOffset, bytes2.byteLength);
+  const boxes = [];
+  const walk = (from, to, depth) => {
+    let offset = from;
+    while (offset + 8 <= to) {
+      let size = view.getUint32(offset);
+      let headerSize = 8;
+      if (size === 1) {
+        if (offset + 16 > to) break;
+        size = Number(view.getBigUint64(offset + 8));
+        headerSize = 16;
+      } else if (size === 0) {
+        size = to - offset;
+      }
+      if (size < headerSize || offset + size > to) break;
+      const type = fourcc(bytes2, offset + 4);
+      boxes.push({ type, start: offset, end: offset + size, headerSize });
+      if ((type === "moov" || type === "trak" || type === "mdia") && depth < 3) {
+        walk(offset + headerSize, offset + size, depth + 1);
+      }
+      offset += size;
+    }
+  };
+  walk(0, bytes2.length, 0);
+  return boxes;
+}
+function stripMediaMetadata(bytes2) {
+  const format = detectMedia(bytes2);
+  if (format === "mp3") {
+    const start = id3v2Length(bytes2);
+    const end = hasId3v1(bytes2) ? bytes2.length - 128 : bytes2.length;
+    if (start === 0 && end === bytes2.length) return bytes2;
+    return bytes2.slice(start, end);
+  }
+  if (format === "mp4") {
+    const boxes = findBoxes(bytes2).filter((b) => b.type === "udta" || b.type === "meta" || b.type === "uuid");
+    const outer = boxes.filter((box) => !boxes.some((other) => other !== box && box.start > other.start && box.end <= other.end));
+    if (outer.length === 0) return bytes2;
+    const out = bytes2.slice();
+    const view = new DataView(out.buffer, out.byteOffset, out.byteLength);
+    for (const box of outer) {
+      out.fill(0, box.start + 8, box.end);
+      view.setUint32(box.start, box.end - box.start);
+      out.set(new TextEncoder().encode("free"), box.start + 4);
+    }
+    return out;
+  }
+  return bytes2;
+}
+var dec2, fourcc, hasId3v1;
+var init_mediaMeta = __esm({
+  "lib/mediaMeta.ts"() {
+    "use strict";
+    dec2 = new TextDecoder("latin1");
+    fourcc = (bytes2, at) => dec2.decode(bytes2.subarray(at, at + 4));
+    hasId3v1 = (bytes2) => bytes2.length > 128 && dec2.decode(bytes2.subarray(bytes2.length - 128, bytes2.length - 125)) === "TAG";
+  }
+});
+
+// lib/clean.ts
+var clean_exports = {};
+__export(clean_exports, {
+  DEFAULT_OPTIONS: () => DEFAULT_OPTIONS,
+  SUPPORTED_EXTENSIONS: () => SUPPORTED_EXTENSIONS2,
+  buildReportText: () => buildReportText,
+  cleanFile: () => cleanFile,
+  loadFile: () => loadFile,
+  sha256: () => sha256,
+  toW3CDTF: () => toW3CDTF
+});
+async function sha256(bytes2) {
+  if (typeof crypto === "undefined" || !crypto.subtle) return "";
+  const digest = await crypto.subtle.digest("SHA-256", bytes2);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function detectKind(name, bytes2) {
+  const lower = name.toLowerCase();
+  const isZip = bytes2[0] === 80 && bytes2[1] === 75;
+  if (isZip) {
+    if (ODF_EXT.some((ext) => lower.endsWith(ext))) return "odf";
+    if (OOXML_EXT.some((ext) => lower.endsWith(ext))) return "ooxml";
+    return "ooxml";
+  }
+  if (new TextDecoder("latin1").decode(bytes2.subarray(0, 5)) === "%PDF-") return "pdf";
+  if (isOle2(bytes2)) return "ole2";
+  if (detectFormat(bytes2) !== "unknown") return "image";
+  if (detectMedia(bytes2) !== "unknown") return "media";
+  if (isRtf(new TextDecoder("latin1").decode(bytes2.subarray(0, 64)))) return "rtf";
+  return "unbekannt";
+}
+async function loadFile(name, bytes2) {
+  const base = {
+    name,
+    size: bytes2.length,
+    kind: detectKind(name, bytes2),
+    fields: [],
+    values: {},
+    customProps: [],
+    findings: [],
+    sha256: await sha256(bytes2),
+    bytes: bytes2
+  };
+  try {
+    switch (base.kind) {
+      case "ooxml":
+      case "odf": {
+        const entries = await readZip(bytes2.buffer.slice(bytes2.byteOffset, bytes2.byteOffset + bytes2.byteLength));
+        base.entries = entries;
+        if (isOdfPackage(entries)) {
+          base.kind = "odf";
+          base.fields = ODF_FIELDS.map((f) => ({
+            key: f.key,
+            label: f.label,
+            kind: f.kind === "datetime" ? "datetime" : f.kind === "number" ? "number" : "text",
+            group: "Dokumenteigenschaften"
+          }));
+          base.values = readOdfFields(entries);
+          base.findings = scanOdf(entries).map((f) => ({ ...f, option: f.id }));
+        } else {
+          base.kind = "ooxml";
+          base.fields = officeFields();
+          base.values = readOfficeFields(entries);
+          base.customProps = readCustomProps(entries);
+          base.findings = [
+            ...scanTraces(entries).map((trace) => ({
+              id: trace.id,
+              label: trace.label,
+              detail: trace.detail,
+              severity: trace.removable ? "mittel" : "hoch",
+              option: trace.removable ? trace.id : void 0
+            })),
+            ...scanDeep(entries).map((finding) => ({
+              id: finding.id,
+              label: finding.label,
+              detail: finding.detail,
+              severity: finding.severity,
+              option: finding.option,
+              parts: finding.parts
+            }))
+          ];
+        }
+        break;
+      }
+      case "pdf": {
+        const info = await readPdf(bytes2);
+        base.fields = PDF_FIELDS.map((f) => ({
+          key: f.key,
+          label: f.label,
+          kind: f.key.endsWith("Date") ? "datetime" : "text",
+          group: "Dokumenteigenschaften"
+        }));
+        base.values = info.values;
+        base.findings = info.findings.map((f) => ({ ...f, option: f.id }));
+        base.error = info.error;
+        break;
+      }
+      case "ole2": {
+        const document = readOle2(bytes2);
+        if (!document) {
+          base.error = "Die Datei lie\xDF sich nicht als OLE2-Dokument lesen.";
+          break;
+        }
+        base.fields = OLE2_FIELDS.map((f) => ({
+          key: f.key,
+          label: f.label,
+          kind: f.kind === "datetime" ? "datetime" : f.kind === "number" ? "number" : "text",
+          group: f.stream === "summary" ? "Dokumenteigenschaften" : "Erweiterte Eigenschaften"
+        }));
+        base.values = document.values;
+        base.findings = document.findings.map((f) => ({ ...f, option: void 0 }));
+        break;
+      }
+      case "rtf": {
+        const text = new TextDecoder("latin1").decode(bytes2);
+        base.text = text;
+        base.fields = RTF_FIELDS.map((f) => ({
+          key: f.key,
+          label: f.label,
+          kind: f.kind === "number" ? "number" : "text",
+          group: "Dokumenteigenschaften"
+        }));
+        base.values = readRtfFields(text);
+        base.findings = scanRtf(text).map((f) => ({ ...f, option: f.id }));
+        break;
+      }
+      case "image": {
+        const found = inspectImage(bytes2);
+        base.findings = found.map((item) => ({
+          id: "imageMetadata",
+          label: item.value ? `${item.label}: ${item.value}` : item.label,
+          detail: "Steht im Metadatenblock des Bildes und wird beim Versenden mitgeschickt.",
+          severity: item.label.startsWith("GPS") ? "hoch" : "mittel",
+          option: "stripImageMetadata"
+        }));
+        break;
+      }
+      case "media": {
+        base.findings = inspectMedia(bytes2).map((item) => ({
+          id: "mediaMetadata",
+          label: item.value ? `${item.label}: ${item.value}` : item.label,
+          detail: "Steht im Tag-Bereich der Mediendatei.",
+          severity: item.label.startsWith("GPS") ? "hoch" : "mittel",
+          option: "stripMediaMetadata"
+        }));
+        break;
+      }
+      default:
+        base.error = "Dieses Format wird nicht unterst\xFCtzt.";
+    }
+  } catch (err) {
+    base.error = err instanceof Error ? err.message : "Die Datei konnte nicht gelesen werden.";
+  }
+  return base;
+}
+async function cleanFile(file, values, customProps, options) {
+  const steps = [];
+  let fileName = file.name;
+  let bytes2 = file.bytes;
+  try {
+    if (file.kind === "ooxml" && file.entries) {
+      const entries = file.entries.map((e) => ({ ...e, data: new Uint8Array(e.data) }));
+      applyFields(entries, values, "core");
+      applyFields(entries, values, "app");
+      steps.push("Dokumenteigenschaften geschrieben");
+      if (options.base.stripCustomProps) {
+        if (removeParts(entries, (name) => name === "docProps/custom.xml").length > 0) {
+          steps.push("Benutzerdefinierte Eigenschaften gel\xF6scht");
+        }
+      } else {
+        applyCustomProps(entries, customProps);
+      }
+      if (options.base.stripThumbnail) {
+        if (removeParts(entries, (name) => name.startsWith("docProps/thumbnail")).length > 0) {
+          steps.push("Vorschaubild entfernt");
+        }
+      }
+      if (options.base.stripComments) {
+        const removed = stripCommentsFromPackage(entries);
+        if (removed.length > 0) steps.push(`Kommentare und Personenliste entfernt (${removed.length} Teil(e))`);
+      }
+      if (options.base.stripRsids) {
+        const touched = stripRsidsFromPackage(entries);
+        if (touched.length > 0) steps.push(`Word-RSIDs aus ${touched.length} Teil(en) entfernt`);
+      }
+      const deep = await applyDeepClean(entries, options.deep);
+      steps.push(...deep.steps.map((step) => step.summary));
+      if (deep.newExtension) {
+        const extension = macroFreeExtension(file.name);
+        if (extension) fileName = file.name.replace(/\.[^.]+$/, `.${extension}`);
+      }
+      const timestamp = options.base.normalizeZipTimestamps ? parseDate(values.modified ?? values.created) : void 0;
+      if (timestamp) steps.push("ZIP-Zeitstempel angeglichen");
+      bytes2 = new Uint8Array(await (await writeZip(entries, timestamp)).arrayBuffer());
+    } else if (file.kind === "odf" && file.entries) {
+      const entries = file.entries.map((e) => ({ ...e, data: new Uint8Array(e.data) }));
+      writeOdfFields(entries, values);
+      steps.push("Dokumenteigenschaften geschrieben");
+      steps.push(...cleanOdf(entries, options.odf));
+      const timestamp = options.base.normalizeZipTimestamps ? parseDate(values.date ?? values["creation-date"]) : void 0;
+      if (timestamp) steps.push("ZIP-Zeitstempel angeglichen");
+      bytes2 = new Uint8Array(await (await writeZip(sortOdfEntries(entries), timestamp)).arrayBuffer());
+    } else if (file.kind === "pdf") {
+      const result = await cleanPdf(file.bytes, values, options.pdf);
+      if (result.error) return failure(file, result.error);
+      bytes2 = result.bytes;
+      steps.push(...result.steps);
+    } else if (file.kind === "ole2") {
+      const result = writeOle2(file.bytes, values);
+      if (result.error) return failure(file, result.error);
+      bytes2 = result.bytes;
+      steps.push(...result.steps);
+    } else if (file.kind === "rtf" && file.text !== void 0) {
+      let text = writeRtfFields(file.text, values);
+      const result = cleanRtf(text, options.rtf);
+      text = result.text;
+      steps.push("Dokumenteigenschaften geschrieben", ...result.steps);
+      bytes2 = new Uint8Array(text.length);
+      for (let i = 0; i < text.length; i++) bytes2[i] = text.charCodeAt(i) & 255;
+    } else if (file.kind === "image") {
+      bytes2 = stripImageMetadata(file.bytes);
+      steps.push(bytes2.length === file.bytes.length ? "Keine Bildmetadaten gefunden" : "Bildmetadaten entfernt");
+    } else if (file.kind === "media") {
+      bytes2 = stripMediaMetadata(file.bytes);
+      steps.push(bytes2.length === file.bytes.length ? "Keine Medien-Tags gefunden" : "Medien-Tags entfernt");
+    } else {
+      return failure(file, file.error ?? "Dieses Format wird nicht unterst\xFCtzt.");
+    }
+  } catch (err) {
+    return failure(file, err instanceof Error ? err.message : "Die Datei konnte nicht geschrieben werden.");
+  }
+  const verified = await loadFile(fileName, bytes2);
+  return {
+    bytes: bytes2,
+    fileName,
+    steps,
+    sha256Before: file.sha256,
+    sha256After: await sha256(bytes2),
+    remaining: verified.findings
+  };
+}
+function failure(file, error) {
+  return {
+    bytes: file.bytes,
+    fileName: file.name,
+    steps: [],
+    sha256Before: file.sha256,
+    sha256After: file.sha256,
+    remaining: file.findings,
+    error
+  };
+}
+function parseDate(value) {
+  if (!value) return /* @__PURE__ */ new Date();
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? /* @__PURE__ */ new Date() : date;
+}
+function buildReportText(entries, generatedAt) {
+  const lines = [];
+  lines.push("Metadaten-Bereinigung \u2014 Protokoll");
+  lines.push(`Erstellt: ${generatedAt}`);
+  lines.push(`Dateien: ${entries.length}`);
+  lines.push("");
+  for (const entry2 of entries) {
+    lines.push("=".repeat(72));
+    lines.push(`Datei:    ${entry2.file}`);
+    lines.push(`Format:   ${entry2.kind}`);
+    lines.push(`Gr\xF6\xDFe:    ${entry2.sizeBefore} \u2192 ${entry2.sizeAfter} Bytes`);
+    lines.push(`SHA-256:  ${entry2.sha256Before}`);
+    lines.push(`          ${entry2.sha256After}`);
+    if (entry2.error) {
+      lines.push(`FEHLER:   ${entry2.error}`);
+      lines.push("");
+      continue;
+    }
+    lines.push("");
+    lines.push(`Gefunden (${entry2.findingsBefore.length}):`);
+    for (const finding of entry2.findingsBefore) lines.push(`  [${finding.severity}] ${finding.label}`);
+    lines.push("");
+    lines.push(`Durchgef\xFChrt (${entry2.steps.length}):`);
+    for (const step of entry2.steps) lines.push(`  - ${step}`);
+    lines.push("");
+    if (entry2.remaining.length === 0) {
+      lines.push("Nachkontrolle: keine Funde mehr.");
+    } else {
+      lines.push(`Nachkontrolle \u2014 weiterhin vorhanden (${entry2.remaining.length}):`);
+      for (const finding of entry2.remaining) lines.push(`  [${finding.severity}] ${finding.label}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+var DEFAULT_OPTIONS, OOXML_EXT, ODF_EXT, OLE2_EXT, IMAGE_EXT, MEDIA_EXT, SUPPORTED_EXTENSIONS2, officeFields;
+var init_clean = __esm({
+  "lib/clean.ts"() {
+    "use strict";
+    init_zip();
+    init_officeMetadata();
+    init_ooxmlDeepClean();
+    init_ooxmlPackage();
+    init_odf();
+    init_pdf();
+    init_rtf();
+    init_ole2();
+    init_imageMeta();
+    init_mediaMeta();
+    DEFAULT_OPTIONS = {
+      base: DEFAULT_CLEANUP,
+      deep: DEFAULT_DEEP_OPTIONS,
+      odf: DEFAULT_ODF_CLEAN,
+      pdf: DEFAULT_PDF_CLEAN,
+      rtf: DEFAULT_RTF_CLEAN
+    };
+    OOXML_EXT = [".docx", ".docm", ".dotx", ".dotm", ".xlsx", ".xlsm", ".xltx", ".xltm", ".pptx", ".pptm", ".potx", ".ppsx", ".ppsm"];
+    ODF_EXT = [".odt", ".ods", ".odp", ".odg", ".otm", ".ott", ".ots", ".otp"];
+    OLE2_EXT = [".doc", ".xls", ".ppt", ".dot", ".xlt", ".pot"];
+    IMAGE_EXT = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".tif", ".tiff"];
+    MEDIA_EXT = [".mp3", ".mp4", ".m4a", ".m4v", ".mov"];
+    SUPPORTED_EXTENSIONS2 = [...OOXML_EXT, ...ODF_EXT, ...OLE2_EXT, ".pdf", ".rtf", ...IMAGE_EXT, ...MEDIA_EXT];
+    officeFields = () => FIELDS.map((field) => ({
+      key: field.key,
+      label: field.label,
+      kind: field.kind,
+      hint: field.hint,
+      group: field.part === "core" ? "Dokumenteigenschaften" : "Erweiterte Eigenschaften"
+    }));
+  }
+});
+
+// tests/ooxmlDeepClean.test.ts
+init_ooxmlDeepClean();
+init_ooxmlPackage();
+
+// tests/fixtures.ts
+init_zip();
 
 // tests/helpers.ts
 var test = (name, fn) => __test(name, fn);
@@ -1714,4 +4036,40 @@ await test("Zweiter Durchlauf findet nichts mehr", async () => {
   await applyDeepClean(entries, allOn);
   const remaining = scanDeep(entries).filter((f) => f.option).filter((f) => f.id !== "croppedImages");
   equal(remaining.length, 0, `Nach der Bereinigung bleiben Funde: ${remaining.map((f) => f.id).join(", ")}`);
+});
+await test("Benutzerdefinierte Eigenschaften: anlegen, \xE4ndern, l\xF6schen", async () => {
+  const { applyCustomProps: applyCustomProps2, readCustomProps: readCustomProps2 } = await Promise.resolve().then(() => (init_officeMetadata(), officeMetadata_exports));
+  const entries = docxEntries();
+  equal(readCustomProps2(entries).length, 0, "Testannahme falsch: es gibt schon Eigenschaften");
+  applyCustomProps2(entries, [{ name: "Aktenzeichen", value: "AZ-2024-0815", type: "lpwstr" }]);
+  const angelegt = readCustomProps2(entries);
+  equal(angelegt.length, 1, "Eigenschaft nicht angelegt");
+  equal(angelegt[0].name, "Aktenzeichen", "Name falsch");
+  equal(angelegt[0].value, "AZ-2024-0815", "Wert falsch");
+  const types2 = textOf(entries, "[Content_Types].xml") ?? "";
+  includes(types2, "custom-properties+xml", "Inhaltstyp fehlt");
+  includes(textOf(entries, "_rels/.rels") ?? "", "custom-properties", "Beziehung fehlt");
+  applyCustomProps2(entries, [{ name: "Aktenzeichen", value: "AZ-2025-0001", type: "lpwstr" }]);
+  equal(readCustomProps2(entries)[0].value, "AZ-2025-0001", "Wert nicht ge\xE4ndert");
+  applyCustomProps2(entries, []);
+  equal(findEntry(entries, "docProps/custom.xml"), void 0, "Teil nicht entfernt");
+  excludes(textOf(entries, "[Content_Types].xml") ?? "", "custom-properties+xml", "Inhaltstyp geblieben");
+});
+await test("Vorlage: angehakte Felder werden gesetzt, nicht angehakte gel\xF6scht", async () => {
+  const { applyTemplate: applyTemplate2, templateFrom: templateFrom2, templateSummary: templateSummary2 } = await Promise.resolve().then(() => (init_template(), template_exports));
+  const { loadFile: loadFile2 } = await Promise.resolve().then(() => (init_clean(), clean_exports));
+  const file = await loadFile2("bericht.docx", await toZip(docxEntries()));
+  const vorlage = templateFrom2(file);
+  equal(vorlage.creator.checked, true, "Vorhandener Wert muss angehakt starten");
+  equal(vorlage.creator.value, "Max Mustermann", "Vorhandener Wert fehlt in der Vorlage");
+  vorlage.creator = { checked: true, value: "Anon" };
+  vorlage.title = { checked: true, value: "Freigabe" };
+  vorlage.lastModifiedBy = { checked: false, value: "egal" };
+  const werte = applyTemplate2(file.fields, vorlage);
+  equal(werte.creator, "Anon", "Gesetzter Wert fehlt");
+  equal(werte.title, "Freigabe", "Gesetzter Wert fehlt");
+  equal(werte.lastModifiedBy, "", "Nicht angehaktes Feld muss geleert werden");
+  const { written, deleted } = templateSummary2(file.fields, vorlage);
+  equal(written, 2, "Zahl der gesetzten Felder falsch");
+  equal(deleted, file.fields.length - 2, "Zahl der gel\xF6schten Felder falsch");
 });

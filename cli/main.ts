@@ -170,7 +170,8 @@ const HELP = `Metadaten-Bereinigung
 
 Optionen
   --profil <name>        standard | streng | weitergabe   (Vorgabe: standard)
-  --profil-datei <pfad>  Eigenes Profil als JSON-Datei
+  --profil-datei <pfad>  Eigenes Profil als JSON-Datei (darf unter "values"
+                         auch eine Vorlage für alle Dateien enthalten)
   --ziel <ordner>        Ergebnisse dorthin schreiben
   --ersetzen             Dateien an Ort und Stelle überschreiben
   --rekursiv             Unterordner mitnehmen
@@ -224,6 +225,11 @@ function targetPath(source: string, args: Args): string {
 async function loadProfile(args: Args): Promise<{ options: Options; clearAll: boolean }> {
   if (args.profilePath) {
     const raw = JSON.parse(await readFile(resolve(args.profilePath), 'utf8'))
+    // A profile may carry a template: values written to every file, with
+    // --setzen on the command line taking precedence over it.
+    if (raw.values && typeof raw.values === 'object') {
+      args.values = { ...raw.values, ...args.values }
+    }
     return {
       options: {
         base: { ...DEFAULT_OPTIONS.base, ...raw.base },

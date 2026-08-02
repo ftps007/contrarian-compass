@@ -95,6 +95,10 @@
       }
       .file-row:hover { background: var(--stone-50); }
       .file-row.active { background: #fffbeb; }
+      .file-entry { display: flex; align-items: center; border-bottom: 1px solid var(--stone-200); }
+      .file-entry .file-row { flex: 1; border-bottom: none; }
+      .file-remove { background: none; color: var(--stone-500); padding: .35rem .6rem; }
+      .file-remove:hover { background: #fee2e2; color: #991b1b; }
       .file-main { min-width: 0; }
       .file-name { display: block; font-weight: 600; color: var(--stone-800); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .badges { display: flex; gap: .35rem; flex-shrink: 0; }
@@ -108,6 +112,15 @@
       #findings { list-style: none; margin: 0; padding: 0; }
       #findings li { border-left: 2px solid var(--stone-300); padding-left: .75rem; margin-bottom: .85rem; }
       .finding-label { font-size: .875rem; font-weight: 600; color: var(--stone-700); margin: 0; }
+
+      .template-note { color: var(--stone-500); font-size: .8125rem; margin-bottom: 1rem; }
+      .template-field label { display: flex; align-items: center; gap: .5rem; }
+      .template-field input[type=checkbox] { accent-color: var(--amber-800); }
+      .template-field input:disabled { background: var(--stone-100); color: var(--stone-500); }
+      .custom-row { display: flex; align-items: flex-end; gap: .75rem; margin-bottom: .75rem; }
+      .custom-row .field { flex: 1; }
+      .custom-add { display: flex; align-items: flex-end; gap: .75rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--stone-200); }
+      .custom-add .field { flex: 1; }
 
       .check { display: flex; gap: .75rem; margin-bottom: .85rem; }
       .check input { margin-top: .25rem; accent-color: var(--amber-800); }
@@ -166,7 +179,22 @@
           <button id="clear" class="link">Liste leeren</button>
         </section>
 
+        <div id="templates"></div>
+
         <div id="fields"></div>
+
+        <section id="custom-section" class="hidden">
+          <h2>Benutzerdefinierte Eigenschaften</h2>
+          <p class="hint">
+            Freie Felder, die Vorlagen- und Dokumentenverwaltungssysteme gern mit Aktenzeichen oder Kürzeln füllen.
+          </p>
+          <div id="custom-props"></div>
+          <div class="custom-add">
+            <div class="field"><label for="custom-name">Neue Eigenschaft</label><input id="custom-name" type="text" placeholder="Name" /></div>
+            <div class="field"><label for="custom-value">Wert</label><input id="custom-value" type="text" /></div>
+            <button id="custom-add">Hinzufügen</button>
+          </div>
+        </section>
 
         <section id="findings-section" class="hidden">
           <h2 id="findings-title">Befund</h2>

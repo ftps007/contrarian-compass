@@ -11,11 +11,13 @@ import {
   type CleanResult,
   type Field,
   type Finding,
+  type FileKind,
   type LoadedFile,
   type Options,
   type ReportEntry,
 } from '@/lib/clean'
 import { OPTION_GROUPS, PROFILES, profileByKey } from '@/lib/profiles'
+import { KIND_LABELS, applyTemplate, templateFrom, templateSummary, type Template } from '@/lib/template'
 import { toLocalInput, type CustomProp } from '@/lib/officeMetadata'
 import { writeZip } from '@/lib/zip'
 
@@ -37,6 +39,8 @@ export default function MetadatenPage() {
   const [selected, setSelected] = useState(0)
   const [profileKey, setProfileKey] = useState('standard')
   const [options, setOptions] = useState<Options>(DEFAULT_OPTIONS)
+  const [templates, setTemplates] = useState<Partial<Record<FileKind, Template>>>({})
+  const [templateCustomProps, setTemplateCustomProps] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<{ kind: 'info' | 'error'; text: string } | null>(null)
@@ -199,6 +203,58 @@ export default function MetadatenPage() {
     download(new TextEncoder().encode(text), 'metadaten-protokoll.txt', 'text/plain')
   }
 
+  /** One file per format, used to know which fields a template offers. */
+  const templateBases = useMemo(() => {
+    const bases = new Map<FileKind, LoadedFile>()
+    for (const item of items) {
+      if (item.file.fields.length > 0 && !bases.has(item.file.kind)) bases.set(item.file.kind, item.file)
+    }
+    return Array.from(bases.entries())
+  }, [items])
+
+  const templateFor = (kind: FileKind, base: LoadedFile): Template => templates[kind] ?? templateFrom(base)
+
+  const setTemplateEntry = (kind: FileKind, base: LoadedFile, key: string, patch: Partial<{ checked: boolean; value: string }>) =>
+    setTemplates((previous) => {
+      const current = previous[kind] ?? templateFrom(base)
+      return { ...previous, [kind]: { ...current, [key]: { ...current[key], ...patch } } }
+    })
+
+  const applyTemplateToAll = (kind: FileKind, base: LoadedFile) => {
+    const template = templateFor(kind, base)
+    let touched = 0
+    setItems((previous) => {
+      const source = previous[selected]
+      return previous.map((item) => {
+        if (item.file.kind !== kind) return item
+        touched++
+        const copyProps = kind === 'ooxml' && templateCustomProps && source
+        return {
+          ...item,
+          values: applyTemplate(item.file.fields, template),
+          customProps: copyProps ? source.customProps.map((prop) => ({ ...prop })) : item.customProps,
+        }
+      })
+    })
+    const { written, deleted } = templateSummary(base.fields, template)
+    setMessage({
+      kind: 'info',
+      text: `Vorlage auf ${touched} Datei(en) angewendet: ${written} Feld(er) gesetzt, ${deleted} gelöscht.`,
+    })
+  }
+
+  const removeItem = (index: number) =>
+    setItems((previous) => {
+      const next = previous.filter((_, i) => i !== index)
+      setSelected((current) => Math.max(0, Math.min(current, next.length - 1)))
+      return next
+    })
+
+  const setCustomProps = (update: (props: CustomProp[]) => CustomProp[]) =>
+    setItems((previous) =>
+      previous.map((item, index) => (index === selected ? { ...item, customProps: update(item.customProps) } : item))
+    )
+
   const setValue = (key: string, value: string) =>
     setItems((previous) =>
       previous.map((item, index) => (index === selected ? { ...item, values: { ...item.values, [key]: value } } : item))
@@ -306,10 +362,10 @@ export default function MetadatenPage() {
               {items.map((item, index) => {
                 const high = item.file.findings.filter((f) => f.severity === 'hoch').length
                 return (
-                  <li key={`${item.file.name}-${index}`}>
+                  <li key={`${item.file.name}-${index}`} className="flex items-center">
                     <button
                       onClick={() => setSelected(index)}
-                      className={`flex w-full items-center justify-between gap-4 px-2 py-3 text-left ${
+                      className={`flex flex-1 items-center justify-between gap-4 px-2 py-3 text-left ${
                         index === selected ? 'bg-amber-50' : 'hover:bg-stone-50'
                       }`}
                     >
@@ -329,6 +385,14 @@ export default function MetadatenPage() {
                         {item.result?.error && <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-800">Fehler</span>}
                       </span>
                     </button>
+                    <button
+                      onClick={() => removeItem(index)}
+                      title="Datei aus der Liste entfernen"
+                      aria-label={`${item.file.name} aus der Liste entfernen`}
+                      className="ml-2 shrink-0 rounded px-2 py-1 text-stone-400 hover:bg-red-100 hover:text-red-800"
+                    >
+                      ✕
+                    </button>
                   </li>
                 )
               })}
@@ -345,7 +409,78 @@ export default function MetadatenPage() {
             </button>
           </section>
 
+          {templateBases.map(([kind, base]) => (
+            <section key={kind} className="rounded-lg border border-stone-200 bg-white p-6">
+              <h2 className="mb-1 text-xl font-semibold text-stone-800">Vorlage für {KIND_LABELS[kind]}</h2>
+              <p className="mb-4 text-sm text-stone-500">
+                Gilt für alle geladenen Dateien dieses Formats. Nicht angehakte Felder werden gelöscht.
+              </p>
+              <div className="grid gap-4 md:grid-cols-2">
+                {base.fields.map((field) => {
+                  const entry = templateFor(kind, base)[field.key] ?? { checked: false, value: '' }
+                  return (
+                    <div key={field.key} className={field.kind === 'longtext' ? 'md:col-span-2' : undefined}>
+                      <label className="mb-1 flex items-center gap-2 text-sm font-medium text-stone-600">
+                        <input
+                          type="checkbox"
+                          checked={entry.checked}
+                          onChange={(e) => setTemplateEntry(kind, base, field.key, { checked: e.target.checked })}
+                          className="h-4 w-4 accent-amber-700"
+                        />
+                        {field.label}
+                      </label>
+                      <input
+                        type={field.kind === 'number' ? 'number' : field.kind === 'datetime' ? 'datetime-local' : 'text'}
+                        value={field.kind === 'datetime' ? toLocalInput(entry.value) : entry.value}
+                        disabled={!entry.checked}
+                        onChange={(e) =>
+                          setTemplateEntry(kind, base, field.key, {
+                            value:
+                              field.kind === 'datetime'
+                                ? e.target.value
+                                  ? toW3CDTF(new Date(e.target.value))
+                                  : ''
+                                : e.target.value,
+                          })
+                        }
+                        className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-600 focus:outline-none disabled:bg-stone-100 disabled:text-stone-400"
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+              {kind === 'ooxml' && (
+                <label className="mt-4 flex gap-3">
+                  <input
+                    type="checkbox"
+                    checked={templateCustomProps}
+                    onChange={(e) => setTemplateCustomProps(e.target.checked)}
+                    className="mt-1 h-4 w-4 accent-amber-700"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-stone-700">
+                      Benutzerdefinierte Eigenschaften mit übertragen
+                    </span>
+                    <span className="block text-sm text-stone-500">
+                      Übernimmt die Liste der ausgewählten Datei in alle anderen dieses Formats.
+                    </span>
+                  </span>
+                </label>
+              )}
+              <button
+                onClick={() => applyTemplateToAll(kind, base)}
+                className="mt-4 rounded-md bg-stone-200 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-300"
+              >
+                Auf alle {items.filter((item) => item.file.kind === kind).length} Datei(en) anwenden
+              </button>
+            </section>
+          ))}
+
           {current && current.file.fields.length > 0 && <FieldEditor item={current} onChange={setValue} />}
+
+          {current && current.file.kind === 'ooxml' && (
+            <CustomPropertyEditor props={current.customProps} onChange={setCustomProps} />
+          )}
 
           {current && (
             <section className="rounded-lg border border-stone-200 bg-white p-6">
@@ -498,6 +633,79 @@ function FieldInput({
       )}
       {field.hint && <p className="mt-1 text-xs text-stone-500">{field.hint}</p>}
     </div>
+  )
+}
+
+function CustomPropertyEditor({
+  props,
+  onChange,
+}: {
+  props: CustomProp[]
+  onChange: (update: (props: CustomProp[]) => CustomProp[]) => void
+}) {
+  const [name, setName] = useState('')
+  const [value, setValue] = useState('')
+  const field = 'w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-600 focus:outline-none'
+
+  const add = () => {
+    const trimmed = name.trim()
+    if (trimmed === '') return
+    onChange((previous) => [...previous.filter((p) => p.name !== trimmed), { name: trimmed, value, type: 'lpwstr' }])
+    setName('')
+    setValue('')
+  }
+
+  return (
+    <section className="rounded-lg border border-stone-200 bg-white p-6">
+      <h2 className="mb-1 text-xl font-semibold text-stone-800">Benutzerdefinierte Eigenschaften</h2>
+      <p className="mb-4 text-sm text-stone-500">
+        Freie Felder, die Vorlagen- und Dokumentenverwaltungssysteme gern mit Aktenzeichen oder Kürzeln füllen.
+      </p>
+
+      <div className="space-y-3">
+        {props.map((prop, index) => (
+          <div key={`${prop.name}-${index}`} className="flex items-end gap-3">
+            <div className="flex-1">
+              <label className="mb-1 block text-sm font-medium text-stone-600">
+                {prop.name} <span className="text-stone-400">({prop.type})</span>
+              </label>
+              <input
+                value={prop.value}
+                onChange={(e) =>
+                  onChange((previous) => previous.map((p, i) => (i === index ? { ...p, value: e.target.value } : p)))
+                }
+                className={field}
+              />
+            </div>
+            <button
+              onClick={() => onChange((previous) => previous.filter((_, i) => i !== index))}
+              className="rounded-md bg-stone-200 px-3 py-2 text-sm text-stone-700 hover:bg-red-100 hover:text-red-800"
+            >
+              Löschen
+            </button>
+          </div>
+        ))}
+        {props.length === 0 && <p className="text-sm text-stone-500">Keine vorhanden.</p>}
+      </div>
+
+      <div className="mt-4 flex items-end gap-3 border-t border-stone-200 pt-4">
+        <div className="flex-1">
+          <label className="mb-1 block text-sm font-medium text-stone-600">Neue Eigenschaft</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className={field} />
+        </div>
+        <div className="flex-1">
+          <label className="mb-1 block text-sm font-medium text-stone-600">Wert</label>
+          <input value={value} onChange={(e) => setValue(e.target.value)} className={field} />
+        </div>
+        <button
+          onClick={add}
+          disabled={name.trim() === ''}
+          className="rounded-md bg-stone-200 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-300 disabled:opacity-50"
+        >
+          Hinzufügen
+        </button>
+      </div>
+    </section>
   )
 }
 

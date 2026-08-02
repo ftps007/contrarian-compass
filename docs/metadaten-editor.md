@@ -50,6 +50,30 @@ benutzerdefinierte Eigenschaften.
 Jede Entfernung räumt ihre Verweise mit auf, damit Office die Datei nicht als reparaturbedürftig
 meldet.
 
+## Vorlagen
+
+Ein Satz Werte für alle geladenen Dateien eines Formats, mit einem Häkchen je Feld: **angehakt heißt
+setzen, nicht angehakt heißt löschen**. Die Vorlage startet mit den Werten der ersten geladenen Datei
+dieses Formats, sodass man vom Vorhandenen aus arbeitet.
+
+Für Word, Excel und PowerPoint lassen sich zusätzlich die benutzerdefinierten Eigenschaften der
+ausgewählten Datei mit übertragen. Sie können in derselben Ansicht angelegt, geändert und gelöscht
+werden — auch in Dateien, die bisher gar keine haben.
+
+Auf der Kommandozeile entspricht das `--setzen key=wert` sowie einem Profil, das unter `values` eine
+Vorlage mitbringt:
+
+```json
+{
+  "values": { "title": "Freigegeben", "creator": "Anon" },
+  "deep": { "removeSpeakerNotes": true }
+}
+```
+
+Direkt gesetzte Werte (`--setzen`) haben Vorrang vor der Vorlage im Profil. Ist zusätzlich das
+Anonymisieren eingeschaltet, gewinnt dieses: ein selbst gesetzter Name wird ebenfalls durch
+„Autor 1" ersetzt.
+
 ## Anonymisieren statt Löschen
 
 Der Schalter „Namen durch Autor 1, 2, 3 ersetzen" bildet jeden gefundenen Namen konsistent auf einen

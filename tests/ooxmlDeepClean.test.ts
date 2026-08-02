@@ -252,3 +252,57 @@ await test('Zweiter Durchlauf findet nichts mehr', async () => {
     .filter((f) => f.id !== 'croppedImages')
   equal(remaining.length, 0, `Nach der Bereinigung bleiben Funde: ${remaining.map((f) => f.id).join(', ')}`)
 })
+
+// ---------------------------------------------------------------------------
+// Custom properties and templates
+// ---------------------------------------------------------------------------
+
+await test('Benutzerdefinierte Eigenschaften: anlegen, ändern, löschen', async () => {
+  const { applyCustomProps, readCustomProps } = await import('../lib/officeMetadata')
+  const entries = docxEntries()
+
+  // Die Testdatei hat noch keine custom.xml — die muss angelegt werden.
+  equal(readCustomProps(entries).length, 0, 'Testannahme falsch: es gibt schon Eigenschaften')
+  applyCustomProps(entries, [{ name: 'Aktenzeichen', value: 'AZ-2024-0815', type: 'lpwstr' }])
+
+  const angelegt = readCustomProps(entries)
+  equal(angelegt.length, 1, 'Eigenschaft nicht angelegt')
+  equal(angelegt[0].name, 'Aktenzeichen', 'Name falsch')
+  equal(angelegt[0].value, 'AZ-2024-0815', 'Wert falsch')
+
+  const types = textOf(entries, '[Content_Types].xml') ?? ''
+  includes(types, 'custom-properties+xml', 'Inhaltstyp fehlt')
+  includes(textOf(entries, '_rels/.rels') ?? '', 'custom-properties', 'Beziehung fehlt')
+
+  // Ändern
+  applyCustomProps(entries, [{ name: 'Aktenzeichen', value: 'AZ-2025-0001', type: 'lpwstr' }])
+  equal(readCustomProps(entries)[0].value, 'AZ-2025-0001', 'Wert nicht geändert')
+
+  // Löschen entfernt den ganzen Teil samt Verweisen
+  applyCustomProps(entries, [])
+  equal(findEntry(entries, 'docProps/custom.xml'), undefined, 'Teil nicht entfernt')
+  excludes(textOf(entries, '[Content_Types].xml') ?? '', 'custom-properties+xml', 'Inhaltstyp geblieben')
+})
+
+await test('Vorlage: angehakte Felder werden gesetzt, nicht angehakte gelöscht', async () => {
+  const { applyTemplate, templateFrom, templateSummary } = await import('../lib/template')
+  const { loadFile } = await import('../lib/clean')
+
+  const file = await loadFile('bericht.docx', await toZip(docxEntries()))
+  const vorlage = templateFrom(file)
+  equal(vorlage.creator.checked, true, 'Vorhandener Wert muss angehakt starten')
+  equal(vorlage.creator.value, 'Max Mustermann', 'Vorhandener Wert fehlt in der Vorlage')
+
+  vorlage.creator = { checked: true, value: 'Anon' }
+  vorlage.title = { checked: true, value: 'Freigabe' }
+  vorlage.lastModifiedBy = { checked: false, value: 'egal' }
+
+  const werte = applyTemplate(file.fields, vorlage)
+  equal(werte.creator, 'Anon', 'Gesetzter Wert fehlt')
+  equal(werte.title, 'Freigabe', 'Gesetzter Wert fehlt')
+  equal(werte.lastModifiedBy, '', 'Nicht angehaktes Feld muss geleert werden')
+
+  const { written, deleted } = templateSummary(file.fields, vorlage)
+  equal(written, 2, 'Zahl der gesetzten Felder falsch')
+  equal(deleted, file.fields.length - 2, 'Zahl der gelöschten Felder falsch')
+})

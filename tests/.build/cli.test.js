@@ -542,13 +542,15 @@ function stripCommentsFromPackage(entries) {
   return removed;
 }
 function applyCustomProps(entries, edited) {
-  const xml = textOf(entries, CUSTOM_PART);
-  if (!xml) return;
+  const existing = textOf(entries, CUSTOM_PART);
+  if (!existing && edited.length === 0) return;
+  const doc = parseXml(
+    existing ?? `<Properties xmlns="${NS.custom}" xmlns:vt="${NS.vt}"/>`,
+    CUSTOM_PART
+  );
   const keptNames = new Set(edited.map((p) => p.name));
   const byName = new Map(edited.map((p) => [p.name, p]));
-  const doc = parseXml(xml, CUSTOM_PART);
-  const nodes = Array.from(doc.getElementsByTagNameNS(NS.custom, "property"));
-  for (const node of nodes) {
+  for (const node of Array.from(doc.getElementsByTagNameNS(NS.custom, "property"))) {
     const name = node.getAttribute("name") ?? "";
     if (!keptNames.has(name)) {
       node.parentNode?.removeChild(node);
@@ -556,14 +558,51 @@ function applyCustomProps(entries, edited) {
     }
     const valueEl = Array.from(node.children).find((c) => c.namespaceURI === NS.vt);
     if (valueEl) valueEl.textContent = byName.get(name)?.value ?? "";
+    byName.delete(name);
+  }
+  for (const prop of Array.from(byName.values())) {
+    const node = doc.createElementNS(NS.custom, "property");
+    node.setAttribute("fmtid", "{D5CDD505-2E9C-101B-9397-08002B2CF9AE}");
+    node.setAttribute("name", prop.name);
+    const value = doc.createElementNS(NS.vt, `vt:${prop.type || "lpwstr"}`);
+    value.textContent = prop.value;
+    node.appendChild(value);
+    doc.documentElement.appendChild(node);
   }
   if (doc.getElementsByTagNameNS(NS.custom, "property").length === 0) {
-    removeParts(entries, (name) => name === CUSTOM_PART);
+    if (existing) removeParts(entries, (name) => name === CUSTOM_PART);
     return;
   }
-  const remaining = Array.from(doc.getElementsByTagNameNS(NS.custom, "property"));
-  remaining.forEach((node, index) => node.setAttribute("pid", String(index + 2)));
+  Array.from(doc.getElementsByTagNameNS(NS.custom, "property")).forEach(
+    (node, index) => node.setAttribute("pid", String(index + 2))
+  );
   setText(entries, CUSTOM_PART, serializeXml(doc));
+  if (!existing) {
+    setContentTypeOverride(entries, CUSTOM_PART, "application/vnd.openxmlformats-officedocument.custom-properties+xml");
+    addRootRelationship(
+      entries,
+      "http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties",
+      CUSTOM_PART
+    );
+  }
+}
+function addRootRelationship(entries, type, target) {
+  const xml = textOf(entries, ROOT_RELS);
+  if (!xml) return;
+  const doc = parseXml(xml, ROOT_RELS);
+  const used = /* @__PURE__ */ new Set();
+  for (const rel3 of Array.from(doc.getElementsByTagNameNS(NS.rel, "Relationship"))) {
+    if (rel3.getAttribute("Type") === type) return;
+    used.add(rel3.getAttribute("Id") ?? "");
+  }
+  let n = 1;
+  while (used.has(`rId${n}`)) n++;
+  const rel2 = doc.createElementNS(NS.rel, "Relationship");
+  rel2.setAttribute("Id", `rId${n}`);
+  rel2.setAttribute("Type", type);
+  rel2.setAttribute("Target", target);
+  doc.documentElement.appendChild(rel2);
+  setText(entries, ROOT_RELS, serializeXml(doc));
 }
 
 // lib/imageMeta.ts
@@ -3437,7 +3476,8 @@ var HELP = `Metadaten-Bereinigung
 
 Optionen
   --profil <name>        standard | streng | weitergabe   (Vorgabe: standard)
-  --profil-datei <pfad>  Eigenes Profil als JSON-Datei
+  --profil-datei <pfad>  Eigenes Profil als JSON-Datei (darf unter "values"
+                         auch eine Vorlage f\xFCr alle Dateien enthalten)
   --ziel <ordner>        Ergebnisse dorthin schreiben
   --ersetzen             Dateien an Ort und Stelle \xFCberschreiben
   --rekursiv             Unterordner mitnehmen
@@ -3482,6 +3522,9 @@ function targetPath(source, args) {
 async function loadProfile(args) {
   if (args.profilePath) {
     const raw = JSON.parse(await readFile(resolve2(args.profilePath), "utf8"));
+    if (raw.values && typeof raw.values === "object") {
+      args.values = { ...raw.values, ...args.values };
+    }
     return {
       options: {
         base: { ...DEFAULT_OPTIONS.base, ...raw.base },
@@ -3908,4 +3951,27 @@ await test("CLI: die Profile sind vollst\xE4ndig definiert", () => {
     Object.values(strict.deep).every(Boolean),
     'Profil "streng" muss alle Tiefenreinigungs-Schalter aktivieren'
   );
+});
+await test("CLI: ein Profil kann eine Vorlage f\xFCr alle Dateien mitbringen", async () => {
+  const dir = await workspace();
+  const profil = join2(dir, "profil.json");
+  await writeFile2(profil, JSON.stringify({ values: { title: "Aus der Vorlage", creator: "Anon" } }));
+  await run(["--profil-datei", profil, "--rekursiv", dir]);
+  for (const datei of ["bericht-bereinigt.docm", join2("unterordner", "kopie-bereinigt.docx")]) {
+    const text = await packageText(join2(dir, datei));
+    includes(text, "<dc:title>Aus der Vorlage</dc:title>", `Titel aus der Vorlage fehlt in ${datei}`);
+    includes(text, "<dc:creator>Anon</dc:creator>", `Autor aus der Vorlage fehlt in ${datei}`);
+  }
+  const dir2 = await workspace();
+  await run(["--profil-datei", profil, "--setzen", "title=Direkt gesetzt", join2(dir2, "bericht.docm")]);
+  includes(await packageText(join2(dir2, "bericht-bereinigt.docm")), "<dc:title>Direkt gesetzt</dc:title>", "Vorrang von --setzen fehlt");
+});
+await test("CLI: Anonymisieren sticht einen gesetzten Namen", async () => {
+  const dir = await workspace();
+  const profil = join2(dir, "profil.json");
+  await writeFile2(profil, JSON.stringify({ deep: { anonymizeAuthors: true }, values: { creator: "Anon" } }));
+  await run(["--profil-datei", profil, join2(dir, "bericht.docm")]);
+  const text = await packageText(join2(dir, "bericht-bereinigt.docm"));
+  excludes(text, "<dc:creator>Anon</dc:creator>", "Gesetzter Name blieb trotz Anonymisierung stehen");
+  includes(text, "<dc:creator>Autor ", "Kein Platzhalter gesetzt");
 });

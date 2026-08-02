@@ -77,6 +77,8 @@ Ergebnisse landen im Download-Ordner. Im Dock erscheint dann der Browser.
 `~/Library/Application Support/Metadaten-Editor/`. Dieser Weg hängt vom Browser ab: manche
 Chrome-Fassungen öffnen lokale Dateien im App-Modus nicht und zeigen ein leeres Fenster.
 
+In der Dateiliste entfernt das ✕ einzelne Einträge; „Liste leeren" wirft alles weg.
+
 Ein Dokument, das auf das App-Symbol gezogen wird, nimmt die App nicht an. Gezogen wird ins
 geöffnete Fenster — einzelne Dateien oder ganze Ordner, die gesamte Fensterfläche ist Ablagezone.
 Alternativ auf das Feld klicken und im Dialog auswählen.

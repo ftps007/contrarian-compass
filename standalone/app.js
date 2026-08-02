@@ -15,6 +15,7 @@ import {
   toW3CDTF,
 } from '../lib/clean'
 import { OPTION_GROUPS, PROFILES, profileByKey } from '../lib/profiles'
+import { KIND_LABELS, applyTemplate, templateFrom, templateSummary } from '../lib/template'
 import { toLocalInput } from '../lib/officeMetadata'
 import { writeZip } from '../lib/zip'
 
@@ -23,6 +24,10 @@ const state = {
   selected: 0,
   profile: 'standard',
   options: DEFAULT_OPTIONS,
+  /** One template per format, keyed by file kind. */
+  templates: {},
+  /** Whether applying the Office template also copies the custom properties. */
+  templateCustomProps: false,
 }
 
 const $ = (id) => document.getElementById(id)
@@ -201,21 +206,33 @@ function renderFileList() {
       if (item.result && !item.result.error) badges.push(el('span', { class: 'badge ok', text: 'bereinigt' }))
       if (item.result?.error) badges.push(el('span', { class: 'badge hoch', text: 'Fehler' }))
 
-      return el('button', {
-        class: `file-row ${index === state.selected ? 'active' : ''}`,
-        onclick: () => {
-          state.selected = index
-          render()
-        },
-      }, [
-        el('span', { class: 'file-main' }, [
-          el('span', { class: 'file-name', text: item.file.name }),
-          el('span', {
-            class: 'hint',
-            text: `${item.file.kind} · ${Math.max(1, Math.round(item.file.size / 1024))} KB · ${item.file.findings.length} Fund(e)${item.file.error ? ` · ${item.file.error}` : ''}`,
-          }),
+      return el('div', { class: 'file-entry' }, [
+        el('button', {
+          class: `file-row ${index === state.selected ? 'active' : ''}`,
+          onclick: () => {
+            state.selected = index
+            render()
+          },
+        }, [
+          el('span', { class: 'file-main' }, [
+            el('span', { class: 'file-name', text: item.file.name }),
+            el('span', {
+              class: 'hint',
+              text: `${item.file.kind} · ${Math.max(1, Math.round(item.file.size / 1024))} KB · ${item.file.findings.length} Fund(e)${item.file.error ? ` · ${item.file.error}` : ''}`,
+            }),
+          ]),
+          el('span', { class: 'badges' }, badges),
         ]),
-        el('span', { class: 'badges' }, badges),
+        el('button', {
+          class: 'file-remove',
+          title: 'Datei aus der Liste entfernen',
+          text: '✕',
+          onclick: () => {
+            state.items.splice(index, 1)
+            if (state.selected >= state.items.length) state.selected = Math.max(0, state.items.length - 1)
+            render()
+          },
+        }),
       ])
     })
   )
@@ -245,6 +262,139 @@ function fieldRow(field, item) {
   const children = [el('label', { text: field.label, for: input.id }), input]
   if (field.hint) children.push(el('p', { class: 'hint', text: field.hint }))
   return el('div', { class: field.kind === 'longtext' ? 'field wide' : 'field' }, children)
+}
+
+/** One loaded file per format tells us which fields a template offers. */
+function templateBases() {
+  const bases = new Map()
+  for (const item of state.items) {
+    if (item.file.fields.length > 0 && !bases.has(item.file.kind)) bases.set(item.file.kind, item.file)
+  }
+  return Array.from(bases.entries())
+}
+
+function templateFor(kind, base) {
+  if (!state.templates[kind]) state.templates[kind] = templateFrom(base)
+  return state.templates[kind]
+}
+
+function renderTemplates() {
+  const container = $('templates')
+  container.replaceChildren(
+    ...templateBases().map(([kind, base]) => {
+      const template = templateFor(kind, base)
+      const anzahl = state.items.filter((item) => item.file.kind === kind).length
+
+      const felder = base.fields.map((field) => {
+        const entry = template[field.key] ?? { checked: false, value: '' }
+        const box = el('input', { type: 'checkbox' })
+        box.checked = entry.checked
+        const wert = el('input', {
+          type: field.kind === 'number' ? 'number' : field.kind === 'datetime' ? 'datetime-local' : 'text',
+        })
+        wert.value = field.kind === 'datetime' ? toLocalInput(entry.value) : entry.value
+        wert.disabled = !entry.checked
+
+        box.addEventListener('change', () => {
+          entry.checked = box.checked
+          wert.disabled = !box.checked
+        })
+        wert.addEventListener('input', () => {
+          entry.value =
+            field.kind === 'datetime' ? (wert.value ? toW3CDTF(new Date(wert.value)) : '') : wert.value
+        })
+        template[field.key] = entry
+
+        return el('div', { class: `field template-field${field.kind === 'longtext' ? ' wide' : ''}` }, [
+          el('label', {}, [box, el('span', { text: field.label })]),
+          wert,
+        ])
+      })
+
+      const teile = [
+        el('h2', { text: `Vorlage für ${KIND_LABELS[kind]}` }),
+        el('p', {
+          class: 'template-note',
+          text: 'Gilt für alle geladenen Dateien dieses Formats. Nicht angehakte Felder werden gelöscht.',
+        }),
+        el('div', { class: 'grid' }, felder),
+      ]
+
+      if (kind === 'ooxml') {
+        const box = el('input', { type: 'checkbox', id: 'template-custom' })
+        box.checked = state.templateCustomProps
+        box.addEventListener('change', () => (state.templateCustomProps = box.checked))
+        teile.push(
+          el('label', { class: 'check' }, [
+            box,
+            el('span', {}, [
+              el('span', { class: 'check-label', text: 'Benutzerdefinierte Eigenschaften mit übertragen' }),
+              el('span', {
+                class: 'hint',
+                text: 'Übernimmt die Liste der ausgewählten Datei in alle anderen dieses Formats.',
+              }),
+            ]),
+          ])
+        )
+      }
+
+      return el('section', {}, [
+        ...teile,
+        el('button', {
+          text: `Auf alle ${anzahl} Datei(en) anwenden`,
+          onclick: () => {
+            const quelle = state.items[state.selected]
+            for (const item of state.items) {
+              if (item.file.kind !== kind) continue
+              item.values = applyTemplate(item.file.fields, template)
+              if (kind === 'ooxml' && state.templateCustomProps && quelle) {
+                item.customProps = quelle.customProps.map((prop) => ({ ...prop }))
+              }
+            }
+            const { written, deleted } = templateSummary(base.fields, template)
+            setMessage('info', `Vorlage auf ${anzahl} Datei(en) angewendet: ${written} Feld(er) gesetzt, ${deleted} gelöscht.`)
+            render()
+          },
+        }),
+      ])
+    })
+  )
+}
+
+function renderCustomProps() {
+  const item = state.items[state.selected]
+  const section = $('custom-section')
+  if (!item || item.file.kind !== 'ooxml') {
+    section.classList.add('hidden')
+    return
+  }
+  section.classList.remove('hidden')
+
+  const container = $('custom-props')
+  if (item.customProps.length === 0) {
+    container.replaceChildren(el('p', { class: 'hint', text: 'Keine vorhanden.' }))
+  } else {
+    container.replaceChildren(
+      ...item.customProps.map((prop, index) => {
+        const input = el('input', { type: 'text' })
+        input.value = prop.value
+        input.addEventListener('input', () => (item.customProps[index].value = input.value))
+        return el('div', { class: 'custom-row' }, [
+          el('div', { class: 'field' }, [
+            el('label', { text: `${prop.name} (${prop.type})` }),
+            input,
+          ]),
+          el('button', {
+            text: 'Löschen',
+            onclick: () => {
+              item.customProps.splice(index, 1)
+              renderCustomProps()
+            },
+          }),
+        ])
+      })
+    )
+  }
 }
 
 function renderFields() {
@@ -379,7 +529,9 @@ function render() {
 
   renderProfiles()
   renderFileList()
+  renderTemplates()
   renderFields()
+  renderCustomProps()
   renderFindings()
   renderOptions()
   renderResults()
@@ -487,9 +639,23 @@ function wireActions() {
     download(new TextEncoder().encode(text), 'metadaten-protokoll.txt', 'text/plain')
   })
 
+  $('custom-add').addEventListener('click', () => {
+    const item = state.items[state.selected]
+    const name = $('custom-name').value.trim()
+    if (!item || name === '') return
+    item.customProps = [
+      ...item.customProps.filter((p) => p.name !== name),
+      { name, value: $('custom-value').value, type: 'lpwstr' },
+    ]
+    $('custom-name').value = ''
+    $('custom-value').value = ''
+    renderCustomProps()
+  })
+
   $('clear').addEventListener('click', () => {
     state.items = []
     state.selected = 0
+    state.templates = {}
     setMessage(null, null)
     render()
   })
