@@ -1,6 +1,17 @@
 # Metadaten-Editor als Mac-App
 
-## Installieren
+## Installieren — ein Befehl
+
+```
+curl -fsSL https://raw.githubusercontent.com/ftps007/contrarian-compass/refs/heads/claude/ms-document-metadata-editor-njx859/standalone/install.sh -o /tmp/mde-install.sh && sudo bash /tmp/mde-install.sh
+```
+
+`install.sh` lädt alle Teile frisch in einen temporären Ordner, prüft anhand von Merkmalen im
+Inhalt, dass wirklich die aktuelle Fassung angekommen ist — GitHubs Auslieferung cacht Dateien
+einige Minuten, und ein halb aktualisierter Ordner sieht aus wie ein kaputtes Programm — und startet
+dann die Installation.
+
+## Installieren aus einer Arbeitskopie
 
 ```
 ./standalone/build-app.sh
