@@ -3686,12 +3686,15 @@ ${xrefOffset}
   }
   async function filesFromDrop(transfer) {
     const entries = Array.from(transfer.items || []).map((item) => typeof item.webkitGetAsEntry === "function" ? item.webkitGetAsEntry() : null).filter(Boolean);
-    if (entries.length === 0) return Array.from(transfer.files || []);
+    if (entries.length === 0) return { files: Array.from(transfer.files || []), skipped: 0 };
     const out = [];
+    let skipped = 0;
+    const fileOf = (entry) => new Promise((done, fail) => entry.file(done, fail));
     const walk = async (entry, depth) => {
       if (entry.isFile) {
-        const file = await new Promise((done, fail) => entry.file(done, fail));
+        const file = await fileOf(entry);
         if (SUPPORTED_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext))) out.push(file);
+        else skipped++;
         return;
       }
       if (!entry.isDirectory || depth > 6) return;
@@ -3702,8 +3705,11 @@ ${xrefOffset}
         for (const child of batch) await walk(child, depth + 1);
       }
     };
-    for (const entry of entries) await walk(entry, 0);
-    return out;
+    for (const entry of entries) {
+      if (entry.isFile) out.push(await fileOf(entry));
+      else await walk(entry, 0);
+    }
+    return { files: out, skipped };
   }
   function wireDropzone() {
     const zone = $("dropzone");
@@ -3728,7 +3734,18 @@ ${xrefOffset}
       target.addEventListener("drop", async (e) => {
         stop(e);
         zone.classList.remove("dragging");
-        await addFiles(await filesFromDrop(e.dataTransfer));
+        const { files, skipped } = await filesFromDrop(e.dataTransfer);
+        if (files.length === 0) {
+          setMessage(
+            "error",
+            skipped > 0 ? `${skipped} Datei(en) im Ordner haben kein unterst\xFCtztes Format \u2014 nichts zu tun.` : "Aus dieser Ablage kam keine Datei an. Klick auf das Feld \xF6ffnet den Auswahldialog."
+          );
+          return;
+        }
+        await addFiles(files);
+        if (skipped > 0) {
+          setMessage("info", `${skipped} Datei(en) im Ordner \xFCbersprungen (Format wird nicht unterst\xFCtzt).`);
+        }
       });
     }
   }

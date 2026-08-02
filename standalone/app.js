@@ -72,18 +72,31 @@ async function addFiles(files) {
   render()
 }
 
-/** Dropped folders arrive as directory entries and have to be walked. */
+/**
+ * Turns a drop into a file list.
+ *
+ * When the browser hands us directory entries we go by those alone: the plain
+ * `files` list of a folder drop also contains the folder itself, which would
+ * otherwise be loaded as a bogus file. Files named directly by the user are
+ * taken as they are — a format we cannot read then says so per file instead of
+ * disappearing. Inside a folder we do filter by extension, otherwise a
+ * Documents folder would drag in hundreds of unrelated files.
+ */
 async function filesFromDrop(transfer) {
   const entries = Array.from(transfer.items || [])
     .map((item) => (typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null))
     .filter(Boolean)
-  if (entries.length === 0) return Array.from(transfer.files || [])
+  if (entries.length === 0) return { files: Array.from(transfer.files || []), skipped: 0 }
 
   const out = []
+  let skipped = 0
+  const fileOf = (entry) => new Promise((done, fail) => entry.file(done, fail))
+
   const walk = async (entry, depth) => {
     if (entry.isFile) {
-      const file = await new Promise((done, fail) => entry.file(done, fail))
+      const file = await fileOf(entry)
       if (SUPPORTED_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext))) out.push(file)
+      else skipped++
       return
     }
     if (!entry.isDirectory || depth > 6) return
@@ -94,8 +107,12 @@ async function filesFromDrop(transfer) {
       for (const child of batch) await walk(child, depth + 1)
     }
   }
-  for (const entry of entries) await walk(entry, 0)
-  return out
+
+  for (const entry of entries) {
+    if (entry.isFile) out.push(await fileOf(entry))
+    else await walk(entry, 0)
+  }
+  return { files: out, skipped }
 }
 
 function wireDropzone() {
@@ -124,7 +141,20 @@ function wireDropzone() {
     target.addEventListener('drop', async (e) => {
       stop(e)
       zone.classList.remove('dragging')
-      await addFiles(await filesFromDrop(e.dataTransfer))
+      const { files, skipped } = await filesFromDrop(e.dataTransfer)
+      if (files.length === 0) {
+        setMessage(
+          'error',
+          skipped > 0
+            ? `${skipped} Datei(en) im Ordner haben kein unterstütztes Format — nichts zu tun.`
+            : 'Aus dieser Ablage kam keine Datei an. Klick auf das Feld öffnet den Auswahldialog.'
+        )
+        return
+      }
+      await addFiles(files)
+      if (skipped > 0) {
+        setMessage('info', `${skipped} Datei(en) im Ordner übersprungen (Format wird nicht unterstützt).`)
+      }
     })
   }
 }

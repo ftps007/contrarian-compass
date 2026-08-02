@@ -64,18 +64,32 @@ export default function MetadatenPage() {
     setBusy(null)
   }, [])
 
-  /** Folders are dropped as directory entries and have to be walked. */
-  const filesFromDrop = async (transfer: DataTransfer): Promise<File[]> => {
+  /**
+   * Turns a drop into a file list.
+   *
+   * When the browser hands us directory entries we go by those alone: the plain
+   * `files` list of a folder drop also contains the folder itself, which would
+   * otherwise be loaded as a bogus file. Files named directly by the user are
+   * taken as they are — a format we cannot read then says so per file instead
+   * of disappearing. Inside a folder we do filter by extension, otherwise a
+   * Documents folder would drag in hundreds of unrelated files.
+   */
+  const filesFromDrop = async (transfer: DataTransfer): Promise<{ files: File[]; skipped: number }> => {
     const entries = Array.from(transfer.items)
       .map((item) => (typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null))
       .filter(Boolean) as FileSystemEntry[]
-    if (entries.length === 0) return Array.from(transfer.files)
+    if (entries.length === 0) return { files: Array.from(transfer.files), skipped: 0 }
 
     const out: File[] = []
+    let skipped = 0
+    const fileOf = (entry: FileSystemEntry) =>
+      new Promise<File>((done, fail) => (entry as FileSystemFileEntry).file(done, fail))
+
     const walk = async (entry: FileSystemEntry, depth: number): Promise<void> => {
       if (entry.isFile) {
-        const file = await new Promise<File>((done, fail) => (entry as FileSystemFileEntry).file(done, fail))
+        const file = await fileOf(entry)
         if (SUPPORTED_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext))) out.push(file)
+        else skipped++
         return
       }
       if (!entry.isDirectory || depth > 6) return
@@ -86,8 +100,12 @@ export default function MetadatenPage() {
         for (const child of batch) await walk(child, depth + 1)
       }
     }
-    for (const entry of entries) await walk(entry, 0)
-    return out
+
+    for (const entry of entries) {
+      if (entry.isFile) out.push(await fileOf(entry))
+      else await walk(entry, 0)
+    }
+    return { files: out, skipped }
   }
 
   const applyProfile = (key: string) => {
@@ -207,7 +225,21 @@ export default function MetadatenPage() {
         onDrop={async (e) => {
           e.preventDefault()
           setDragging(false)
-          await addFiles(await filesFromDrop(e.dataTransfer))
+          const { files, skipped } = await filesFromDrop(e.dataTransfer)
+          if (files.length === 0) {
+            setMessage({
+              kind: 'error',
+              text:
+                skipped > 0
+                  ? `${skipped} Datei(en) im Ordner haben kein unterstütztes Format — nichts zu tun.`
+                  : 'Aus dieser Ablage kam keine Datei an. Klick auf das Feld öffnet den Auswahldialog.',
+            })
+            return
+          }
+          await addFiles(files)
+          if (skipped > 0) {
+            setMessage({ kind: 'info', text: `${skipped} Datei(en) im Ordner übersprungen (Format wird nicht unterstützt).` })
+          }
         }}
         onClick={() => inputRef.current?.click()}
         className={`cursor-pointer rounded-lg border-2 border-dashed p-10 text-center transition-colors ${

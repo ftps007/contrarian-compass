@@ -21,6 +21,7 @@ ICON="$HERE/icon.icns"
 SWIFT_SOURCE="$HERE/native/main.swift"
 
 MODE=auto        # auto | nativ | fenster | browser
+FALLBACK_REASON=""
 SELFTEST=true
 TARGET_DIR=""
 for arg in "$@"; do
@@ -73,10 +74,11 @@ NATIVE=false
 
 if [ "$MODE" = auto ] || [ "$MODE" = nativ ]; then
   if [ ! -f "$SWIFT_SOURCE" ]; then
-    echo "Hinweis: native/main.swift fehlt — es wird die Browser-Variante gebaut."
+    FALLBACK_REASON="native/main.swift wurde nicht mit heruntergeladen."
+    echo "Hinweis: $FALLBACK_REASON"
   elif ! command -v swiftc >/dev/null 2>&1; then
-    echo "Hinweis: swiftc nicht gefunden, daher keine native App."
-    echo "         Einmalig nachinstallieren mit:  xcode-select --install"
+    FALLBACK_REASON="swiftc wurde nicht gefunden (xcode-select --install)."
+    echo "Hinweis: $FALLBACK_REASON"
     if [ "$MODE" = nativ ]; then exit 1; fi
   else
     echo "Baue die native App (das dauert einen Moment)…"
@@ -88,6 +90,7 @@ if [ "$MODE" = auto ] || [ "$MODE" = nativ ]; then
       echo "  FEHLT Übersetzung fehlgeschlagen:" >&2
       sed 's/^/        /' "$BUILD_LOG" >&2
       if [ "$MODE" = nativ ]; then rm -f "$BUILD_LOG"; exit 1; fi
+      FALLBACK_REASON="Die Übersetzung der nativen App ist fehlgeschlagen (Meldungen oben)."
       echo "        Es wird stattdessen die Browser-Variante gebaut." >&2
     fi
     rm -f "$BUILD_LOG"
@@ -282,6 +285,7 @@ if [ "$NATIVE" = true ]; then
 elif [ "$MODE" = fenster ]; then
   echo "Startmodus: eigenes Fenster über einen Chrome-Browser."
 else
-  echo "Startmodus: Standardbrowser."
+  echo "Startmodus: Standardbrowser (kein eigenes Programmfenster)."
+  if [ -n "$FALLBACK_REASON" ]; then echo "            Grund: $FALLBACK_REASON"; fi
 fi
 echo "Protokoll jedes Starts: $LOG"
