@@ -140,10 +140,28 @@ var Lexer = class {
     this.pos++;
     let depth = 1;
     let out = "";
+    const escapes = { 110: "\n", 114: "\r", 116: "	", 98: "\b", 102: "\f" };
     while (this.pos < this.bytes.length) {
       const c = this.bytes[this.pos++];
       if (c === 92) {
-        out += String.fromCharCode(this.bytes[this.pos++]);
+        const next = this.bytes[this.pos++];
+        if (next === void 0) break;
+        if (escapes[next] !== void 0) {
+          out += escapes[next];
+        } else if (next >= 48 && next <= 55) {
+          let code = next - 48;
+          for (let k = 0; k < 2; k++) {
+            const digit = this.bytes[this.pos];
+            if (digit === void 0 || digit < 48 || digit > 55) break;
+            code = code * 8 + (digit - 48);
+            this.pos++;
+          }
+          out += String.fromCharCode(code & 255);
+        } else if (next === 13) {
+          if (this.bytes[this.pos] === 10) this.pos++;
+        } else if (next !== 10) {
+          out += String.fromCharCode(next);
+        }
         continue;
       }
       if (c === 40) depth++;
@@ -194,15 +212,29 @@ async function inflate(data) {
 }
 async function parsePdf(bytes) {
   const objects = /* @__PURE__ */ new Map();
+  const positions = /* @__PURE__ */ new Map();
   const trailer = /* @__PURE__ */ new Map();
   const fromObjectStreams = /* @__PURE__ */ new Set();
+  const damaged = /* @__PURE__ */ new Set();
+  const unsupported = [];
+  const define = (num, value, position) => {
+    const current = positions.get(num);
+    if (current !== void 0 && current > position) return;
+    objects.set(num, value);
+    positions.set(num, position);
+  };
   const text = latin1.decode(bytes);
   const objectPattern = /(\d+)\s+(\d+)\s+obj\b/g;
+  const streamPositions = /* @__PURE__ */ new Map();
   let match;
   while (match = objectPattern.exec(text)) {
+    const num = Number(match[1]);
     const lexer = new Lexer(bytes, match.index + match[0].length);
     const value = lexer.parse();
-    objects.set(Number(match[1]), value);
+    define(num, value, match.index);
+    if (value.t === "stream") streamPositions.set(num, match.index);
+    if (!lexer.peekKeyword("endobj")) damaged.add(num);
+    objectPattern.lastIndex = Math.max(objectPattern.lastIndex, lexer.pos);
   }
   const trailerPattern = /trailer\b/g;
   while (match = trailerPattern.exec(text)) {
@@ -210,44 +242,70 @@ async function parsePdf(bytes) {
     const value = lexer.parse();
     if (value.t === "dict") for (const [key, entry] of Array.from(value.v.entries())) trailer.set(key, entry);
   }
-  for (const [, value] of Array.from(objects.entries())) {
-    const dict = value.t === "stream" ? value.dict : value.t === "dict" ? value.v : null;
-    if (!dict) continue;
-    const type = dict.get("Type");
-    if (type?.t === "name" && type.v === "XRef") {
-      for (const key of ["Root", "Info", "Encrypt"]) {
-        const entry = dict.get(key);
-        if (entry && !trailer.has(key)) trailer.set(key, entry);
-      }
+  const xrefStreams = Array.from(objects.entries()).filter(([, value]) => {
+    const dict = dictOf(value);
+    const type = dict?.get("Type");
+    return type?.t === "name" && type.v === "XRef";
+  }).sort(([a], [b]) => (positions.get(a) ?? 0) - (positions.get(b) ?? 0));
+  for (const [, value] of xrefStreams) {
+    const dict = dictOf(value);
+    for (const key of ["Root", "Info", "Encrypt"]) {
+      const entry = dict.get(key);
+      if (entry) trailer.set(key, entry);
     }
   }
-  for (const [, value] of Array.from(objects.entries())) {
+  for (const [num, value] of Array.from(objects.entries())) {
     if (value.t !== "stream") continue;
     const type = value.dict.get("Type");
     if (type?.t !== "name" || type.v !== "ObjStm") continue;
     const filter = value.dict.get("Filter");
     const filterName = filter?.t === "name" ? filter.v : filter?.t === "arr" && filter.v[0]?.t === "name" ? filter.v[0].v : "";
+    const params = dictOf(value.dict.get("DecodeParms"));
+    const predictor = params?.get("Predictor");
+    if (filter?.t === "arr" && filter.v.length > 1) {
+      unsupported.push(`Objektstrom ${num} verwendet mehrere Filter.`);
+      continue;
+    }
+    if (filterName !== "" && filterName !== "FlateDecode") {
+      unsupported.push(`Objektstrom ${num} verwendet den Filter ${filterName}.`);
+      continue;
+    }
+    if (predictor?.t === "num" && predictor.v > 1) {
+      unsupported.push(`Objektstrom ${num} verwendet einen Pr\xE4diktor.`);
+      continue;
+    }
     const data = filterName === "FlateDecode" ? await inflate(value.data) : value.data;
-    if (!data) continue;
+    if (!data) {
+      unsupported.push(`Objektstrom ${num} l\xE4sst sich nicht entpacken.`);
+      continue;
+    }
     const count = value.dict.get("N");
     const first = value.dict.get("First");
-    if (count?.t !== "num" || first?.t !== "num") continue;
+    if (count?.t !== "num" || first?.t !== "num") {
+      unsupported.push(`Objektstrom ${num} hat keine g\xFCltige Kopfzeile.`);
+      continue;
+    }
     const header = new Lexer(data, 0);
     const pairs = [];
     for (let i = 0; i < count.v; i++) {
-      const num = Number(header.readToken());
+      const member = Number(header.readToken());
       const offset = Number(header.readToken());
-      if (Number.isNaN(num) || Number.isNaN(offset)) break;
-      pairs.push({ num, offset });
+      if (Number.isNaN(member) || Number.isNaN(offset)) break;
+      pairs.push({ num: member, offset });
     }
+    const position = streamPositions.get(num) ?? 0;
     for (const pair of pairs) {
+      if (first.v + pair.offset >= data.length) {
+        damaged.add(pair.num);
+        continue;
+      }
       const lexer = new Lexer(data, first.v + pair.offset);
-      objects.set(pair.num, lexer.parse());
+      define(pair.num, lexer.parse(), position);
       fromObjectStreams.add(pair.num);
     }
   }
   const revisions = (text.match(/%%EOF/g) ?? []).length;
-  return { objects, trailer, encrypted: trailer.has("Encrypt"), revisions, fromObjectStreams };
+  return { objects, trailer, encrypted: trailer.has("Encrypt"), revisions, fromObjectStreams, damaged, unsupported };
 }
 var resolve = (doc, value) => value?.t === "ref" ? doc.objects.get(value.num) : value;
 function dictOf(value) {
@@ -297,6 +355,16 @@ async function readPdf(bytes) {
     } else {
       values[field.key] = "";
     }
+  }
+  const blocker = rewriteBlocker(doc);
+  if (blocker) {
+    findings.push({
+      id: "unsafe",
+      label: "Datei kann nicht sicher neu geschrieben werden",
+      detail: `${blocker} Die Metadaten werden angezeigt, eine Bereinigung wird aber abgelehnt, statt eine besch\xE4digte Datei zu liefern.`,
+      severity: "hoch"
+    });
+    return { values, findings, error: blocker };
   }
   if (info && Array.from(info.keys()).length > 0) {
     const extra = Array.from(info.keys()).filter((key) => !PDF_FIELDS.some((f) => f.key === key));
@@ -407,6 +475,31 @@ function countAnnotations(doc) {
   }
   return count;
 }
+function rewriteBlocker(doc) {
+  if (doc.unsupported.length > 0) return doc.unsupported[0];
+  const root = doc.trailer.get("Root");
+  if (!root) return "Im PDF wurde kein Dokumentkatalog gefunden.";
+  if (!dictOf(resolve(doc, root))) return "Der Dokumentkatalog ist unlesbar.";
+  const live = reachable(doc, [root]);
+  const broken = Array.from(doc.damaged).filter((num) => live.has(num));
+  if (broken.length > 0) {
+    return `${broken.length} ben\xF6tigte(s) Objekt(e) sind besch\xE4digt (z. B. Nr. ${broken[0]}).`;
+  }
+  return null;
+}
+function contentStreamCount(doc) {
+  const root = doc.trailer.get("Root");
+  if (!root) return 0;
+  let count = 0;
+  for (const num of Array.from(reachable(doc, [root]))) {
+    const value = doc.objects.get(num);
+    if (value?.t !== "stream") continue;
+    const type = value.dict.get("Type");
+    if (type?.t === "name" && (type.v === "ObjStm" || type.v === "XRef")) continue;
+    count++;
+  }
+  return count;
+}
 function reachable(doc, roots) {
   const seen = /* @__PURE__ */ new Set();
   const queue = [...roots];
@@ -446,6 +539,8 @@ async function cleanPdf(bytes, values, options) {
   const doc = await parsePdf(bytes);
   const steps = [];
   if (doc.encrypted) return { bytes, steps, error: "Verschl\xFCsselte PDFs werden nicht ver\xE4ndert." };
+  const blocker = rewriteBlocker(doc);
+  if (blocker) return { bytes, steps, error: `${blocker} Bereinigung abgelehnt.` };
   const rootRef = doc.trailer.get("Root");
   if (!rootRef) return { bytes, steps, error: "Im PDF wurde kein Dokumentkatalog gefunden \u2014 Bereinigung abgelehnt." };
   const root = dictOf(resolve(doc, rootRef));
@@ -503,6 +598,7 @@ async function cleanPdf(bytes, values, options) {
     infoEntries.set(field.key, { t: "str", v: field.key.endsWith("Date") ? isoToPdfDate(value) : value, hex: false });
   }
   const pagesBefore = countPages(doc);
+  const streamsBefore = contentStreamCount(doc);
   const live = reachable(doc, [rootRef]);
   const dropped = doc.objects.size - live.size;
   if (dropped > 0 && options.dropOldRevisions) steps.push(`${dropped} nicht erreichbare Objekte weggelassen`);
@@ -516,6 +612,22 @@ async function cleanPdf(bytes, values, options) {
       bytes,
       steps,
       error: `Sicherheitspr\xFCfung fehlgeschlagen: vorher ${pagesBefore} Seiten, nachher ${pagesAfter}. Die Datei wurde nicht ver\xE4ndert.`
+    };
+  }
+  const streamsAfter = contentStreamCount(check);
+  if (check.damaged.size > 0 || rewriteBlocker(check)) {
+    return {
+      bytes,
+      steps,
+      error: `Sicherheitspr\xFCfung fehlgeschlagen: das Ergebnis liest sich nicht sauber zur\xFCck (${check.damaged.size} besch\xE4digte Objekte). Die Datei wurde nicht ver\xE4ndert.`
+    };
+  }
+  const removesStreams = options.removeEmbeddedFiles || options.removeXmp || options.removeAnnotations || options.removeJavaScript;
+  if (streamsAfter < streamsBefore && !removesStreams) {
+    return {
+      bytes,
+      steps,
+      error: `Sicherheitspr\xFCfung fehlgeschlagen: ${streamsBefore - streamsAfter} Inhaltsstrom/-str\xF6me fehlen im Ergebnis. Die Datei wurde nicht ver\xE4ndert.`
     };
   }
   if (infoEntries.size > 0) steps.push(`Info-W\xF6rterbuch neu geschrieben (${infoEntries.size} Feld(er))`);
@@ -912,4 +1024,58 @@ await test("PDF: verschl\xFCsselte Dateien werden abgelehnt statt besch\xE4digt"
 await test("PDF: Nicht-PDF wird sauber abgelehnt", async () => {
   const info = await readPdf(new TextEncoder().encode("Das ist kein PDF"));
   assert(info.error, "Fremdformat nicht erkannt");
+});
+await test("PDF: ein eingebettetes PDF in einem Stream kapert keine Objekte", async () => {
+  const inner = new TextDecoder("latin1").decode(simplePdf());
+  const outer = new TextDecoder("latin1").decode(simplePdf());
+  const injected = outer.replace(
+    "4 0 obj",
+    `12 0 obj
+<< /Type /EmbeddedFile /Length ${inner.length} >>
+stream
+${inner}
+endstream
+endobj
+4 0 obj`
+  );
+  const bytes = new Uint8Array(injected.length);
+  for (let i = 0; i < injected.length; i++) bytes[i] = injected.charCodeAt(i) & 255;
+  const info = await readPdf(bytes);
+  equal(info.error, void 0, `Fehler: ${info.error}`);
+  const result = await cleanPdf(bytes, info.values, DEFAULT_PDF_CLEAN);
+  equal(result.error, void 0, `Fehler: ${result.error}`);
+  const text = asText(result.bytes);
+  includes(text, "Sichtbarer Seitentext", "Seiteninhalt des \xE4u\xDFeren PDFs verloren");
+  equal((await pdfStructure(result.bytes)).pages, 1, "Seitenzahl ver\xE4ndert");
+});
+await test("PDF: eine sp\xE4tere direkte Definition schl\xE4gt den Objektstrom", async () => {
+  const base = new TextDecoder("latin1").decode(objectStreamPdf());
+  const update = `3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R >>
+endobj
+trailer
+<< /Root 1 0 R >>
+%%EOF
+`;
+  const text = base + update;
+  const bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 255;
+  const result = await cleanPdf(bytes, {}, DEFAULT_PDF_CLEAN);
+  equal(result.error, void 0, `Fehler: ${result.error}`);
+  includes(asText(result.bytes), "/MediaBox [ 0 300 300 ]".replace("[ 0 300", "[ 0 0 300"), "Die neuere Definition wurde nicht \xFCbernommen");
+});
+await test("PDF: Escapes in Zeichenketten werden korrekt gelesen", async () => {
+  const text = new TextDecoder("latin1").decode(simplePdf()).replace("(Interner Entwurf)", "(Zeile\\nUmbruch \\(Klammer\\) \\101\\102 Ende)");
+  const bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 255;
+  const info = await readPdf(bytes);
+  equal(info.values.Title, "Zeile\nUmbruch (Klammer) AB Ende", "Escapes falsch aufgel\xF6st");
+});
+await test("PDF: ein besch\xE4digtes, ben\xF6tigtes Objekt f\xFChrt zur Ablehnung statt zu einer kaputten Datei", async () => {
+  const text = new TextDecoder("latin1").decode(simplePdf()).replace("/Contents 4 0 R /Resources", "/Contents 4 0 R /Resources <<");
+  const bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 255;
+  const result = await cleanPdf(bytes, {}, DEFAULT_PDF_CLEAN);
+  assert(result.error, "Besch\xE4digtes Objekt wurde nicht erkannt");
+  equal(result.bytes, bytes, "Datei wurde trotz Ablehnung ver\xE4ndert");
 });

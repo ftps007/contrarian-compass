@@ -114,6 +114,30 @@ tatsächlich durchgeführten Schritte, SHA-256 vor und nach der Bearbeitung sowi
 das Ergebnis wird erneut eingelesen und gescannt, sodass im Protokoll steht, was noch da ist. Das
 Protokoll lässt sich als Textdatei herunterladen bzw. mit `--bericht` schreiben.
 
+## Zuverlässigkeit und Geschwindigkeit
+
+Das Werkzeug darf nie eine Datei beschädigen und nie abstürzen. Dafür sorgen drei Schichten:
+
+- **Strenges Lesen.** ZIP-Archive werden mit Prüfsumme gelesen; passwortgeschützte oder fremd
+  komprimierte Einträge, abgeschnittene Archive und falsche Längen werden als Fehler gemeldet statt
+  als Daten weitergereicht. PDFs, deren benötigte Objekte nicht sauber bis `endobj` lesbar sind oder
+  deren Objektströme Filter nutzen, die nicht aufgelöst werden können, werden zum Neuschreiben
+  abgelehnt. Bildfilter geben bei widersprüchlichen Längenfeldern das Original zurück, nie ein
+  abgeschnittenes Bild.
+- **Verifiziertes Schreiben.** Jedes PDF wird nach dem Schreiben erneut eingelesen; stimmen
+  Seitenzahl oder Zahl der Inhaltsströme nicht oder liest sich ein Objekt nicht sauber zurück, wird
+  die Originaldatei zurückgegeben. Bilder und Mediendateien, von denen nach dem Entfernen nichts
+  Gültiges übrig bliebe, werden abgelehnt. Jede Datei durchläuft nach der Bereinigung eine
+  Nachkontrolle, deren Ergebnis im Protokoll steht.
+- **Zerstörungstests.** Jede Testdatei wird abgeschnitten, mit Bitfehlern versehen, genullt und mit
+  Müll ergänzt und muss ohne Ausnahme verarbeitet werden; was ohne Fehler zurückkommt, muss sich
+  wieder einlesen lassen (`tests/robustness.test.ts`).
+
+Geschwindigkeit: Unveränderte Teile eines Office-Pakets werden in ihrer vorhandenen komprimierten
+Form kopiert statt neu komprimiert, bereits komprimierte Formate (Bilder, Medien) werden ungepackt
+abgelegt, und Komprimieren wie Entpacken laufen parallel. Ein Paket mit 150 Folien und 16 MB Bildern
+braucht damit rund 0,6 s statt 1,4 s, 47 MB rund 2 s.
+
 ## Grenzen
 
 Ehrlich benannt statt stillschweigend übergangen:

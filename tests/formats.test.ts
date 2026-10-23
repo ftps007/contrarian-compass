@@ -3,8 +3,8 @@ import { DEFAULT_RTF_CLEAN, cleanRtf, isRtf, readRtfFields, scanRtf, writeRtfFie
 import { detectMedia, inspectMedia, stripMediaMetadata } from '../lib/mediaMeta'
 import { isOle2, readOle2, writeOle2 } from '../lib/ole2'
 import { textOf } from '../lib/ooxmlPackage'
-import { makeEntries } from './fixtures'
-import { assert, bytes, concatBytes, equal, excludes, includes, jpegWithMetadata, pngWithMetadata, test } from './helpers'
+import { makeEntries, mp3WithTags, mp4WithTags, ole2Fixture } from './fixtures'
+import { assert, equal, excludes, includes, jpegWithMetadata, pngWithMetadata, test } from './helpers'
 
 // ---------------------------------------------------------------------------
 // OpenDocument
@@ -136,39 +136,6 @@ await test('RTF: geschweifte Klammern in Werten werden maskiert', () => {
 // Media
 // ---------------------------------------------------------------------------
 
-function mp3WithTags(): Uint8Array {
-  const frames = concatBytes([
-    bytes('TPE1'),
-    new Uint8Array([0, 0, 0, 16, 0, 0]),
-    bytes('\0Max Mustermann\0'),
-    bytes('COMM'),
-    new Uint8Array([0, 0, 0, 20, 0, 0]),
-    bytes('\0deuInternes Material'),
-  ])
-  const size = frames.length
-  const header = concatBytes([
-    bytes('ID3'),
-    new Uint8Array([3, 0, 0, (size >> 21) & 0x7f, (size >> 14) & 0x7f, (size >> 7) & 0x7f, size & 0x7f]),
-  ])
-  const audio = new Uint8Array([0xff, 0xfb, 0x90, 0x00, 1, 2, 3, 4, 5, 6, 7, 8])
-  const id3v1 = concatBytes([bytes('TAG'), bytes('Titel'.padEnd(30, '\0')), bytes('Max Mustermann'.padEnd(95, '\0'))])
-  return concatBytes([header, frames, audio, id3v1])
-}
-
-function mp4WithTags(): Uint8Array {
-  // Box names are single bytes — "©nam" starts with 0xA9, not with UTF-8.
-  const box = (type: string, payload: Uint8Array) => {
-    const out = new Uint8Array(8 + payload.length)
-    new DataView(out.buffer).setUint32(0, out.length)
-    for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i) & 0xff
-    out.set(payload, 8)
-    return out
-  }
-  const udta = box('udta', concatBytes([box('©nam', bytes('Internes Video')), box('©xyz', bytes('+52.5200+13.4050/'))]))
-  const moov = box('moov', concatBytes([box('mvhd', new Uint8Array(24)), udta]))
-  return concatBytes([box('ftyp', bytes('isom')), moov, box('mdat', bytes('AUDIOVIDEODATEN'))])
-}
-
 await test('MP3: Tags werden erkannt und entfernt, Audio bleibt', () => {
   const mp3 = mp3WithTags()
   equal(detectMedia(mp3), 'mp3', 'Format nicht erkannt')
@@ -204,65 +171,6 @@ await test('MP4: Tags werden überschrieben, Dateigröße bleibt gleich', () => 
 // ---------------------------------------------------------------------------
 // OLE2 (.doc/.xls/.ppt)
 // ---------------------------------------------------------------------------
-
-/** A compound file with two empty property-set streams in full sectors. */
-function ole2Fixture(): Uint8Array {
-  const SECTOR = 512
-  const sectors = 18
-  const out = new Uint8Array(SECTOR * (sectors + 1))
-  const view = new DataView(out.buffer)
-
-  out.set(new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), 0)
-  view.setUint16(0x1e, 9, true) // 512-byte sectors
-  view.setUint16(0x20, 6, true) // 64-byte mini sectors
-  view.setUint32(0x2c, 1, true) // one FAT sector
-  view.setUint32(0x30, 1, true) // directory starts at sector 1
-  view.setUint32(0x38, 4096, true) // mini stream cutoff
-  view.setUint32(0x3c, 0xfffffffe, true) // no mini FAT
-  view.setUint32(0x44, 0xfffffffe, true) // no DIFAT extension
-  view.setUint32(0x4c, 0, true) // FAT lives in sector 0
-  for (let i = 1; i < 109; i++) view.setUint32(0x4c + i * 4, 0xffffffff, true)
-
-  const fat = SECTOR // sector 0 starts right after the header
-  const setFat = (index: number, value: number) => view.setUint32(fat + index * 4, value, true)
-  for (let i = 0; i < SECTOR / 4; i++) setFat(i, 0xffffffff)
-  setFat(0, 0xfffffffd) // FAT itself
-  setFat(1, 0xfffffffe) // directory
-  for (let i = 2; i < 9; i++) setFat(i, i + 1)
-  setFat(9, 0xfffffffe)
-  for (let i = 10; i < 17; i++) setFat(i, i + 1)
-  setFat(17, 0xfffffffe)
-
-  const directory = SECTOR * 2
-  const writeEntry = (index: number, name: string, type: number, start: number, size: number) => {
-    const at = directory + index * 128
-    for (let i = 0; i < name.length; i++) view.setUint16(at + i * 2, name.charCodeAt(i), true)
-    view.setUint16(at + 0x40, name.length * 2 + 2, true)
-    out[at + 0x42] = type
-    view.setUint32(at + 0x74, start, true)
-    view.setUint32(at + 0x78, size, true)
-  }
-  writeEntry(0, 'Root Entry', 5, 0xfffffffe, 0)
-  writeEntry(1, 'SummaryInformation', 2, 2, 4096)
-  writeEntry(2, 'DocumentSummaryInformation', 2, 10, 4096)
-
-  // Two valid but empty property sets.
-  for (const [start, fmtid] of [
-    [2, 'e0859ff2f94f6810ab9108002b27b3d9'],
-    [10, '02d5cdd59c2e1b1093970800 2b2cf9ae'.replace(/ /g, '')],
-  ] as const) {
-    const at = SECTOR * (start + 1)
-    view.setUint16(at, 0xfffe, true)
-    view.setUint32(at + 4, 0x00020006, true)
-    view.setUint32(at + 24, 1, true)
-    for (let i = 0; i < 16; i++) out[at + 28 + i] = parseInt(fmtid.substr(i * 2, 2), 16)
-    view.setUint32(at + 44, 48, true)
-    view.setUint32(at + 48, 8, true) // section size
-    view.setUint32(at + 52, 0, true) // no properties
-  }
-
-  return out
-}
 
 await test('OLE2: Datei wird erkannt und gelesen', () => {
   const file = ole2Fixture()

@@ -218,10 +218,30 @@ class Lexer {
     this.pos++
     let depth = 1
     let out = ''
+    const escapes: Record<number, string> = { 0x6e: '\n', 0x72: '\r', 0x74: '\t', 0x62: '\b', 0x66: '\f' }
     while (this.pos < this.bytes.length) {
       const c = this.bytes[this.pos++]
       if (c === 0x5c) {
-        out += String.fromCharCode(this.bytes[this.pos++])
+        const next = this.bytes[this.pos++]
+        if (next === undefined) break
+        if (escapes[next] !== undefined) {
+          out += escapes[next]
+        } else if (next >= 0x30 && next <= 0x37) {
+          // Up to three octal digits.
+          let code = next - 0x30
+          for (let k = 0; k < 2; k++) {
+            const digit = this.bytes[this.pos]
+            if (digit === undefined || digit < 0x30 || digit > 0x37) break
+            code = code * 8 + (digit - 0x30)
+            this.pos++
+          }
+          out += String.fromCharCode(code & 0xff)
+        } else if (next === 0x0d) {
+          // Line continuation, CR or CRLF.
+          if (this.bytes[this.pos] === 0x0a) this.pos++
+        } else if (next !== 0x0a) {
+          out += String.fromCharCode(next) // \( \) \\ and unknown escapes: the character itself
+        }
         continue
       }
       if (c === 0x28) depth++
@@ -276,6 +296,10 @@ interface PdfDocument {
   revisions: number
   /** Object numbers that came out of an object stream. */
   fromObjectStreams: Set<number>
+  /** Objects whose body did not parse cleanly up to `endobj`. */
+  damaged: Set<number>
+  /** Why the file cannot be rewritten safely, if it cannot. */
+  unsupported: string[]
 }
 
 async function inflate(data: Uint8Array): Promise<Uint8Array | null> {
@@ -292,20 +316,43 @@ async function inflate(data: Uint8Array): Promise<Uint8Array | null> {
 
 async function parsePdf(bytes: Uint8Array): Promise<PdfDocument> {
   const objects = new Map<number, PdfValue>()
+  // Where each object's current definition sits in the file. A definition
+  // later in the file supersedes an earlier one — that is what an incremental
+  // update is — and that rule must also hold between object streams and plain
+  // objects, so object-stream members inherit their stream's offset.
+  const positions = new Map<number, number>()
   const trailer = new Map<string, PdfValue>()
   const fromObjectStreams = new Set<number>()
+  const damaged = new Set<number>()
+  const unsupported: string[] = []
 
-  // Every "n g obj" in file order; later definitions replace earlier ones.
-  const text = latin1.decode(bytes)
-  const objectPattern = /(\d+)\s+(\d+)\s+obj\b/g
-  let match: RegExpExecArray | null
-  while ((match = objectPattern.exec(text))) {
-    const lexer = new Lexer(bytes, match.index + match[0].length)
-    const value = lexer.parse()
-    objects.set(Number(match[1]), value)
+  const define = (num: number, value: PdfValue, position: number): void => {
+    const current = positions.get(num)
+    if (current !== undefined && current > position) return
+    objects.set(num, value)
+    positions.set(num, position)
   }
 
-  // Trailer dictionaries, again later-wins.
+  const text = latin1.decode(bytes)
+  const objectPattern = /(\d+)\s+(\d+)\s+obj\b/g
+  const streamPositions = new Map<number, number>()
+  let match: RegExpExecArray | null
+  while ((match = objectPattern.exec(text))) {
+    const num = Number(match[1])
+    const lexer = new Lexer(bytes, match.index + match[0].length)
+    const value = lexer.parse()
+    define(num, value, match.index)
+    if (value.t === 'stream') streamPositions.set(num, match.index)
+
+    // The body must end at "endobj"; anything else means we misread it.
+    if (!lexer.peekKeyword('endobj')) damaged.add(num)
+
+    // Continue behind the object, so "1 0 obj" inside a stream — an embedded
+    // PDF, say — is not mistaken for a definition of our own object 1.
+    objectPattern.lastIndex = Math.max(objectPattern.lastIndex, lexer.pos)
+  }
+
+  // Trailer dictionaries, later-wins.
   const trailerPattern = /trailer\b/g
   while ((match = trailerPattern.exec(text))) {
     const lexer = new Lexer(bytes, match.index + 7)
@@ -313,51 +360,81 @@ async function parsePdf(bytes: Uint8Array): Promise<PdfDocument> {
     if (value.t === 'dict') for (const [key, entry] of Array.from(value.v.entries())) trailer.set(key, entry)
   }
 
-  // Cross-reference streams carry the same information in newer files.
-  for (const [, value] of Array.from(objects.entries())) {
-    const dict = value.t === 'stream' ? value.dict : value.t === 'dict' ? value.v : null
-    if (!dict) continue
-    const type = dict.get('Type')
-    if (type?.t === 'name' && type.v === 'XRef') {
-      for (const key of ['Root', 'Info', 'Encrypt']) {
-        const entry = dict.get(key)
-        if (entry && !trailer.has(key)) trailer.set(key, entry)
-      }
+  // Cross-reference streams carry the same information in newer files; the
+  // one furthest into the file is the current one.
+  const xrefStreams = Array.from(objects.entries())
+    .filter(([, value]) => {
+      const dict = dictOf(value)
+      const type = dict?.get('Type')
+      return type?.t === 'name' && type.v === 'XRef'
+    })
+    .sort(([a], [b]) => (positions.get(a) ?? 0) - (positions.get(b) ?? 0))
+  for (const [, value] of xrefStreams) {
+    const dict = dictOf(value)!
+    for (const key of ['Root', 'Info', 'Encrypt']) {
+      const entry = dict.get(key)
+      if (entry) trailer.set(key, entry)
     }
   }
 
   // Unpack object streams so their objects join the pool.
-  for (const [, value] of Array.from(objects.entries())) {
+  for (const [num, value] of Array.from(objects.entries())) {
     if (value.t !== 'stream') continue
     const type = value.dict.get('Type')
     if (type?.t !== 'name' || type.v !== 'ObjStm') continue
+
     const filter = value.dict.get('Filter')
     const filterName = filter?.t === 'name' ? filter.v : filter?.t === 'arr' && filter.v[0]?.t === 'name' ? filter.v[0].v : ''
+    const params = dictOf(value.dict.get('DecodeParms'))
+    const predictor = params?.get('Predictor')
+    if (filter?.t === 'arr' && filter.v.length > 1) {
+      unsupported.push(`Objektstrom ${num} verwendet mehrere Filter.`)
+      continue
+    }
+    if (filterName !== '' && filterName !== 'FlateDecode') {
+      unsupported.push(`Objektstrom ${num} verwendet den Filter ${filterName}.`)
+      continue
+    }
+    if (predictor?.t === 'num' && predictor.v > 1) {
+      unsupported.push(`Objektstrom ${num} verwendet einen Prädiktor.`)
+      continue
+    }
     const data = filterName === 'FlateDecode' ? await inflate(value.data) : value.data
-    if (!data) continue
+    if (!data) {
+      unsupported.push(`Objektstrom ${num} lässt sich nicht entpacken.`)
+      continue
+    }
 
     const count = value.dict.get('N')
     const first = value.dict.get('First')
-    if (count?.t !== 'num' || first?.t !== 'num') continue
+    if (count?.t !== 'num' || first?.t !== 'num') {
+      unsupported.push(`Objektstrom ${num} hat keine gültige Kopfzeile.`)
+      continue
+    }
 
     const header = new Lexer(data, 0)
     const pairs: { num: number; offset: number }[] = []
     for (let i = 0; i < count.v; i++) {
-      const num = Number(header.readToken())
+      const member = Number(header.readToken())
       const offset = Number(header.readToken())
-      if (Number.isNaN(num) || Number.isNaN(offset)) break
-      pairs.push({ num, offset })
+      if (Number.isNaN(member) || Number.isNaN(offset)) break
+      pairs.push({ num: member, offset })
     }
+    const position = streamPositions.get(num) ?? 0
     for (const pair of pairs) {
+      if (first.v + pair.offset >= data.length) {
+        damaged.add(pair.num)
+        continue
+      }
       const lexer = new Lexer(data, first.v + pair.offset)
-      objects.set(pair.num, lexer.parse())
+      define(pair.num, lexer.parse(), position)
       fromObjectStreams.add(pair.num)
     }
   }
 
   const revisions = (text.match(/%%EOF/g) ?? []).length
 
-  return { objects, trailer, encrypted: trailer.has('Encrypt'), revisions, fromObjectStreams }
+  return { objects, trailer, encrypted: trailer.has('Encrypt'), revisions, fromObjectStreams, damaged, unsupported }
 }
 
 const resolve = (doc: PdfDocument, value: PdfValue | undefined): PdfValue | undefined =>
@@ -423,6 +500,18 @@ export async function readPdf(bytes: Uint8Array): Promise<PdfInfo> {
     } else {
       values[field.key] = ''
     }
+  }
+
+  // Reading works on anything; rewriting must not. Say so up front.
+  const blocker = rewriteBlocker(doc)
+  if (blocker) {
+    findings.push({
+      id: 'unsafe',
+      label: 'Datei kann nicht sicher neu geschrieben werden',
+      detail: `${blocker} Die Metadaten werden angezeigt, eine Bereinigung wird aber abgelehnt, statt eine beschädigte Datei zu liefern.`,
+      severity: 'hoch',
+    })
+    return { values, findings, error: blocker }
   }
 
   if (info && Array.from(info.keys()).length > 0) {
@@ -550,6 +639,35 @@ function countAnnotations(doc: PdfDocument): number {
   return count
 }
 
+/** Reason the document cannot be rewritten without risk, or null. */
+function rewriteBlocker(doc: PdfDocument): string | null {
+  if (doc.unsupported.length > 0) return doc.unsupported[0]
+  const root = doc.trailer.get('Root')
+  if (!root) return 'Im PDF wurde kein Dokumentkatalog gefunden.'
+  if (!dictOf(resolve(doc, root))) return 'Der Dokumentkatalog ist unlesbar.'
+  const live = reachable(doc, [root])
+  const broken = Array.from(doc.damaged).filter((num) => live.has(num))
+  if (broken.length > 0) {
+    return `${broken.length} benötigte(s) Objekt(e) sind beschädigt (z. B. Nr. ${broken[0]}).`
+  }
+  return null
+}
+
+/** Reachable content streams — the payload a rewrite must carry over intact. */
+function contentStreamCount(doc: PdfDocument): number {
+  const root = doc.trailer.get('Root')
+  if (!root) return 0
+  let count = 0
+  for (const num of Array.from(reachable(doc, [root]))) {
+    const value = doc.objects.get(num)
+    if (value?.t !== 'stream') continue
+    const type = value.dict.get('Type')
+    if (type?.t === 'name' && (type.v === 'ObjStm' || type.v === 'XRef')) continue
+    count++
+  }
+  return count
+}
+
 function reachable(doc: PdfDocument, roots: PdfValue[]): Set<number> {
   const seen = new Set<number>()
   const queue: PdfValue[] = [...roots]
@@ -615,6 +733,8 @@ export async function cleanPdf(
   const steps: string[] = []
 
   if (doc.encrypted) return { bytes, steps, error: 'Verschlüsselte PDFs werden nicht verändert.' }
+  const blocker = rewriteBlocker(doc)
+  if (blocker) return { bytes, steps, error: `${blocker} Bereinigung abgelehnt.` }
   const rootRef = doc.trailer.get('Root')
   if (!rootRef) return { bytes, steps, error: 'Im PDF wurde kein Dokumentkatalog gefunden — Bereinigung abgelehnt.' }
 
@@ -683,6 +803,7 @@ export async function cleanPdf(
   }
 
   const pagesBefore = countPages(doc)
+  const streamsBefore = contentStreamCount(doc)
   const live = reachable(doc, [rootRef])
   const dropped = doc.objects.size - live.size
   if (dropped > 0 && options.dropOldRevisions) steps.push(`${dropped} nicht erreichbare Objekte weggelassen`)
@@ -699,6 +820,24 @@ export async function cleanPdf(
       bytes,
       steps,
       error: `Sicherheitsprüfung fehlgeschlagen: vorher ${pagesBefore} Seiten, nachher ${pagesAfter}. Die Datei wurde nicht verändert.`,
+    }
+  }
+  // Streams are where page content, fonts and images live: the rewrite may not
+  // lose a single one, and every object we wrote must read back cleanly.
+  const streamsAfter = contentStreamCount(check)
+  if (check.damaged.size > 0 || rewriteBlocker(check)) {
+    return {
+      bytes,
+      steps,
+      error: `Sicherheitsprüfung fehlgeschlagen: das Ergebnis liest sich nicht sauber zurück (${check.damaged.size} beschädigte Objekte). Die Datei wurde nicht verändert.`,
+    }
+  }
+  const removesStreams = options.removeEmbeddedFiles || options.removeXmp || options.removeAnnotations || options.removeJavaScript
+  if (streamsAfter < streamsBefore && !removesStreams) {
+    return {
+      bytes,
+      steps,
+      error: `Sicherheitsprüfung fehlgeschlagen: ${streamsBefore - streamsAfter} Inhaltsstrom/-ströme fehlen im Ergebnis. Die Datei wurde nicht verändert.`,
     }
   }
 

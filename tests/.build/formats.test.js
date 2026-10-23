@@ -83,6 +83,7 @@ function inspectImage(bytes2) {
       }
       if (marker === 218 || marker === 217) break;
       const length = bytes2[offset + 2] << 8 | bytes2[offset + 3];
+      if (length < 2 || offset + 2 + length > bytes2.length) break;
       const dataStart = offset + 4;
       if (marker === 225) {
         if (ascii(bytes2, dataStart, 6) === "Exif\0\0") {
@@ -103,6 +104,7 @@ function inspectImage(bytes2) {
     while (offset + 8 <= bytes2.length) {
       const length = view.getUint32(offset);
       const type = ascii(bytes2, offset + 4, 4);
+      if (offset + 12 + length > bytes2.length) break;
       if (type === "eXIf") findings.push(...readTiff(bytes2, offset + 8));
       else if (type === "tEXt" || type === "zTXt") findings.push({ label: "PNG-Textfeld" });
       else if (type === "iTXt") findings.push({ label: "XMP-Block (Bearbeitungsverlauf)" });
@@ -149,7 +151,7 @@ function stripJpeg(bytes2) {
   const out = [bytes2.subarray(0, 2)];
   let offset = 2;
   while (offset + 4 <= bytes2.length) {
-    if (bytes2[offset] !== 255) break;
+    if (bytes2[offset] !== 255) return bytes2;
     const marker = bytes2[offset + 1];
     if (marker === 1 || marker >= 208 && marker <= 215) {
       out.push(bytes2.subarray(offset, offset + 2));
@@ -161,6 +163,7 @@ function stripJpeg(bytes2) {
       return concat(out);
     }
     const length = bytes2[offset + 2] << 8 | bytes2[offset + 3];
+    if (length < 2 || offset + 2 + length > bytes2.length) return bytes2;
     const segment = bytes2.subarray(offset, offset + 2 + length);
     const dataStart = offset + 4;
     const isExifOrXmp = marker === 225;
@@ -172,21 +175,26 @@ function stripJpeg(bytes2) {
     if (!isExifOrXmp && !isIptc && !isComment && !isOtherApp) out.push(segment);
     offset += 2 + length;
   }
-  return concat(out);
+  return bytes2;
 }
 function stripPng(bytes2) {
   const view = new DataView(bytes2.buffer, bytes2.byteOffset, bytes2.byteLength);
   const out = [bytes2.subarray(0, 8)];
   let offset = 8;
+  let sawEnd = false;
   while (offset + 12 <= bytes2.length) {
     const length = view.getUint32(offset);
     const type = ascii(bytes2, offset + 4, 4);
     const end = offset + 12 + length;
+    if (end > bytes2.length) return bytes2;
     if (PNG_KEEP.has(type)) out.push(bytes2.subarray(offset, end));
-    if (type === "IEND") break;
+    if (type === "IEND") {
+      sawEnd = true;
+      break;
+    }
     offset = end;
   }
-  return concat(out);
+  return sawEnd ? concat(out) : bytes2;
 }
 function stripWebp(bytes2) {
   const view = new DataView(bytes2.buffer, bytes2.byteOffset, bytes2.byteLength);
@@ -197,6 +205,7 @@ function stripWebp(bytes2) {
     const fourcc2 = ascii(bytes2, offset, 4);
     const size = view.getUint32(offset + 4, true);
     const padded = size + size % 2;
+    if (offset + 8 + padded > bytes2.length) return bytes2;
     const chunk = bytes2.subarray(offset, offset + 8 + padded);
     if (fourcc2 === "EXIF" || fourcc2 === "XMP ") sawMetadata = true;
     else kept.push(chunk);
@@ -272,9 +281,18 @@ var encoder = new TextEncoder();
 function findEntry(entries, name) {
   return entries.find((e) => e.name === name);
 }
+var decoded = /* @__PURE__ */ new WeakMap();
+function decodeText(data) {
+  let text = decoded.get(data);
+  if (text === void 0) {
+    text = decoder.decode(data);
+    decoded.set(data, text);
+  }
+  return text;
+}
 function textOf(entries, name) {
   const entry2 = findEntry(entries, name);
-  return entry2 ? decoder.decode(entry2.data) : void 0;
+  return entry2 ? decodeText(entry2.data) : void 0;
 }
 function setText(entries, name, xml) {
   const entry2 = findEntry(entries, name);
@@ -300,7 +318,7 @@ function editParts(entries, matches, edit) {
   const touched = [];
   for (const entry2 of entries) {
     if (!matches(entry2.name)) continue;
-    const xml = decoder.decode(entry2.data);
+    const xml = decodeText(entry2.data);
     const next = edit(xml, entry2.name);
     if (next !== xml) {
       entry2.data = encoder.encode(next);
@@ -349,7 +367,7 @@ function removeParts(entries, predicate) {
     setText(entries, CONTENT_TYPES, serializeXml(doc));
   }
   for (const entry2 of entries.filter((e) => e.name.endsWith(".rels"))) {
-    const doc = parseXml(decoder.decode(entry2.data), entry2.name);
+    const doc = parseXml(decodeText(entry2.data), entry2.name);
     let changed = false;
     for (const rel of Array.from(doc.getElementsByTagNameNS(NS.rel, "Relationship"))) {
       if (rel.getAttribute("TargetMode") === "External") continue;
@@ -813,6 +831,7 @@ function stripMediaMetadata(bytes2) {
     const start = id3v2Length(bytes2);
     const end = hasId3v1(bytes2) ? bytes2.length - 128 : bytes2.length;
     if (start === 0 && end === bytes2.length) return bytes2;
+    if (start >= end) return bytes2;
     return bytes2.slice(start, end);
   }
   if (format === "mp4") {
@@ -1356,6 +1375,87 @@ function entry(name, data) {
   };
 }
 var makeEntries = (files) => Object.entries(files).map(([name, data]) => entry(name, data));
+function mp3WithTags() {
+  const frames = concatBytes([
+    bytes("TPE1"),
+    new Uint8Array([0, 0, 0, 16, 0, 0]),
+    bytes("\0Max Mustermann\0"),
+    bytes("COMM"),
+    new Uint8Array([0, 0, 0, 20, 0, 0]),
+    bytes("\0deuInternes Material")
+  ]);
+  const size = frames.length;
+  const header = concatBytes([
+    bytes("ID3"),
+    new Uint8Array([3, 0, 0, size >> 21 & 127, size >> 14 & 127, size >> 7 & 127, size & 127])
+  ]);
+  const audio = new Uint8Array([255, 251, 144, 0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  const id3v1 = concatBytes([bytes("TAG"), bytes("Titel".padEnd(30, "\0")), bytes("Max Mustermann".padEnd(95, "\0"))]);
+  return concatBytes([header, frames, audio, id3v1]);
+}
+function mp4WithTags() {
+  const box = (type, payload) => {
+    const out = new Uint8Array(8 + payload.length);
+    new DataView(out.buffer).setUint32(0, out.length);
+    for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i) & 255;
+    out.set(payload, 8);
+    return out;
+  };
+  const udta = box("udta", concatBytes([box("\xA9nam", bytes("Internes Video")), box("\xA9xyz", bytes("+52.5200+13.4050/"))]));
+  const moov = box("moov", concatBytes([box("mvhd", new Uint8Array(24)), udta]));
+  return concatBytes([box("ftyp", bytes("isom")), moov, box("mdat", bytes("AUDIOVIDEODATEN"))]);
+}
+function ole2Fixture() {
+  const SECTOR = 512;
+  const sectors = 18;
+  const out = new Uint8Array(SECTOR * (sectors + 1));
+  const view = new DataView(out.buffer);
+  out.set(new Uint8Array([208, 207, 17, 224, 161, 177, 26, 225]), 0);
+  view.setUint16(30, 9, true);
+  view.setUint16(32, 6, true);
+  view.setUint32(44, 1, true);
+  view.setUint32(48, 1, true);
+  view.setUint32(56, 4096, true);
+  view.setUint32(60, 4294967294, true);
+  view.setUint32(68, 4294967294, true);
+  view.setUint32(76, 0, true);
+  for (let i = 1; i < 109; i++) view.setUint32(76 + i * 4, 4294967295, true);
+  const fat = SECTOR;
+  const setFat = (index, value) => view.setUint32(fat + index * 4, value, true);
+  for (let i = 0; i < SECTOR / 4; i++) setFat(i, 4294967295);
+  setFat(0, 4294967293);
+  setFat(1, 4294967294);
+  for (let i = 2; i < 9; i++) setFat(i, i + 1);
+  setFat(9, 4294967294);
+  for (let i = 10; i < 17; i++) setFat(i, i + 1);
+  setFat(17, 4294967294);
+  const directory = SECTOR * 2;
+  const writeEntry = (index, name, type, start, size) => {
+    const at = directory + index * 128;
+    for (let i = 0; i < name.length; i++) view.setUint16(at + i * 2, name.charCodeAt(i), true);
+    view.setUint16(at + 64, name.length * 2 + 2, true);
+    out[at + 66] = type;
+    view.setUint32(at + 116, start, true);
+    view.setUint32(at + 120, size, true);
+  };
+  writeEntry(0, "Root Entry", 5, 4294967294, 0);
+  writeEntry(1, "SummaryInformation", 2, 2, 4096);
+  writeEntry(2, "DocumentSummaryInformation", 2, 10, 4096);
+  for (const [start, fmtid] of [
+    [2, "e0859ff2f94f6810ab9108002b27b3d9"],
+    [10, "02d5cdd59c2e1b1093970800 2b2cf9ae".replace(/ /g, "")]
+  ]) {
+    const at = SECTOR * (start + 1);
+    view.setUint16(at, 65534, true);
+    view.setUint32(at + 4, 131078, true);
+    view.setUint32(at + 24, 1, true);
+    for (let i = 0; i < 16; i++) out[at + 28 + i] = parseInt(fmtid.substr(i * 2, 2), 16);
+    view.setUint32(at + 44, 48, true);
+    view.setUint32(at + 48, 8, true);
+    view.setUint32(at + 52, 0, true);
+  }
+  return out;
+}
 
 // tests/formats.test.ts
 var odfEntries = () => makeEntries({
@@ -1441,36 +1541,6 @@ await test("RTF: geschweifte Klammern in Werten werden maskiert", () => {
   const read = readRtfFields(written);
   equal(read.title, "Titel {mit} \\Klammern", "Maskierung kaputt");
 });
-function mp3WithTags() {
-  const frames = concatBytes([
-    bytes("TPE1"),
-    new Uint8Array([0, 0, 0, 16, 0, 0]),
-    bytes("\0Max Mustermann\0"),
-    bytes("COMM"),
-    new Uint8Array([0, 0, 0, 20, 0, 0]),
-    bytes("\0deuInternes Material")
-  ]);
-  const size = frames.length;
-  const header = concatBytes([
-    bytes("ID3"),
-    new Uint8Array([3, 0, 0, size >> 21 & 127, size >> 14 & 127, size >> 7 & 127, size & 127])
-  ]);
-  const audio = new Uint8Array([255, 251, 144, 0, 1, 2, 3, 4, 5, 6, 7, 8]);
-  const id3v1 = concatBytes([bytes("TAG"), bytes("Titel".padEnd(30, "\0")), bytes("Max Mustermann".padEnd(95, "\0"))]);
-  return concatBytes([header, frames, audio, id3v1]);
-}
-function mp4WithTags() {
-  const box = (type, payload) => {
-    const out = new Uint8Array(8 + payload.length);
-    new DataView(out.buffer).setUint32(0, out.length);
-    for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i) & 255;
-    out.set(payload, 8);
-    return out;
-  };
-  const udta = box("udta", concatBytes([box("\xA9nam", bytes("Internes Video")), box("\xA9xyz", bytes("+52.5200+13.4050/"))]));
-  const moov = box("moov", concatBytes([box("mvhd", new Uint8Array(24)), udta]));
-  return concatBytes([box("ftyp", bytes("isom")), moov, box("mdat", bytes("AUDIOVIDEODATEN"))]);
-}
 await test("MP3: Tags werden erkannt und entfernt, Audio bleibt", () => {
   const mp3 = mp3WithTags();
   equal(detectMedia(mp3), "mp3", "Format nicht erkannt");
@@ -1498,57 +1568,6 @@ await test("MP4: Tags werden \xFCberschrieben, Dateigr\xF6\xDFe bleibt gleich", 
   equal(cleaned.length, mp4.length, "Dateigr\xF6\xDFe ver\xE4ndert");
   includes(text, "free", "Platzhalter-Box fehlt");
 });
-function ole2Fixture() {
-  const SECTOR = 512;
-  const sectors = 18;
-  const out = new Uint8Array(SECTOR * (sectors + 1));
-  const view = new DataView(out.buffer);
-  out.set(new Uint8Array([208, 207, 17, 224, 161, 177, 26, 225]), 0);
-  view.setUint16(30, 9, true);
-  view.setUint16(32, 6, true);
-  view.setUint32(44, 1, true);
-  view.setUint32(48, 1, true);
-  view.setUint32(56, 4096, true);
-  view.setUint32(60, 4294967294, true);
-  view.setUint32(68, 4294967294, true);
-  view.setUint32(76, 0, true);
-  for (let i = 1; i < 109; i++) view.setUint32(76 + i * 4, 4294967295, true);
-  const fat = SECTOR;
-  const setFat = (index, value) => view.setUint32(fat + index * 4, value, true);
-  for (let i = 0; i < SECTOR / 4; i++) setFat(i, 4294967295);
-  setFat(0, 4294967293);
-  setFat(1, 4294967294);
-  for (let i = 2; i < 9; i++) setFat(i, i + 1);
-  setFat(9, 4294967294);
-  for (let i = 10; i < 17; i++) setFat(i, i + 1);
-  setFat(17, 4294967294);
-  const directory = SECTOR * 2;
-  const writeEntry = (index, name, type, start, size) => {
-    const at = directory + index * 128;
-    for (let i = 0; i < name.length; i++) view.setUint16(at + i * 2, name.charCodeAt(i), true);
-    view.setUint16(at + 64, name.length * 2 + 2, true);
-    out[at + 66] = type;
-    view.setUint32(at + 116, start, true);
-    view.setUint32(at + 120, size, true);
-  };
-  writeEntry(0, "Root Entry", 5, 4294967294, 0);
-  writeEntry(1, "SummaryInformation", 2, 2, 4096);
-  writeEntry(2, "DocumentSummaryInformation", 2, 10, 4096);
-  for (const [start, fmtid] of [
-    [2, "e0859ff2f94f6810ab9108002b27b3d9"],
-    [10, "02d5cdd59c2e1b1093970800 2b2cf9ae".replace(/ /g, "")]
-  ]) {
-    const at = SECTOR * (start + 1);
-    view.setUint16(at, 65534, true);
-    view.setUint32(at + 4, 131078, true);
-    view.setUint32(at + 24, 1, true);
-    for (let i = 0; i < 16; i++) out[at + 28 + i] = parseInt(fmtid.substr(i * 2, 2), 16);
-    view.setUint32(at + 44, 48, true);
-    view.setUint32(at + 48, 8, true);
-    view.setUint32(at + 52, 0, true);
-  }
-  return out;
-}
 await test("OLE2: Datei wird erkannt und gelesen", () => {
   const file = ole2Fixture();
   assert(isOle2(file), "OLE2 nicht erkannt");

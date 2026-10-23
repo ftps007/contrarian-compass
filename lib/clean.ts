@@ -289,7 +289,7 @@ export async function cleanFile(
 
   try {
     if (file.kind === 'ooxml' && file.entries) {
-      const entries = file.entries.map((e) => ({ ...e, data: new Uint8Array(e.data) }))
+      const entries = file.entries.map((e) => ({ ...e })) // data arrays are never edited in place, so sharing them is safe
       applyFields(entries, values, 'core')
       applyFields(entries, values, 'app')
       steps.push('Dokumenteigenschaften geschrieben')
@@ -326,7 +326,7 @@ export async function cleanFile(
       if (timestamp) steps.push('ZIP-Zeitstempel angeglichen')
       bytes = new Uint8Array(await (await writeZip(entries, timestamp)).arrayBuffer())
     } else if (file.kind === 'odf' && file.entries) {
-      const entries = file.entries.map((e) => ({ ...e, data: new Uint8Array(e.data) }))
+      const entries = file.entries.map((e) => ({ ...e })) // data arrays are never edited in place, so sharing them is safe
       writeOdfFields(entries, values)
       steps.push('Dokumenteigenschaften geschrieben')
       steps.push(...cleanOdf(entries, options.odf))
@@ -352,9 +352,21 @@ export async function cleanFile(
       for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 0xff
     } else if (file.kind === 'image') {
       bytes = stripImageMetadata(file.bytes)
+      if (bytes.length === file.bytes.length && inspectImage(file.bytes).length > 0) {
+        return failure(file, 'Die Bilddatei ist beschädigt — die Metadaten ließen sich nicht sicher entfernen.')
+      }
+      if (detectFormat(bytes) === 'unknown') {
+        return failure(file, 'Nach dem Entfernen bliebe kein gültiges Bild übrig — die Datei ist unvollständig.')
+      }
       steps.push(bytes.length === file.bytes.length ? 'Keine Bildmetadaten gefunden' : 'Bildmetadaten entfernt')
     } else if (file.kind === 'media') {
       bytes = stripMediaMetadata(file.bytes)
+      if (bytes.length === file.bytes.length && inspectMedia(file.bytes).length > 0) {
+        return failure(file, 'Die Mediendatei ist beschädigt — die Tags ließen sich nicht sicher entfernen.')
+      }
+      if (detectMedia(bytes) === 'unknown') {
+        return failure(file, 'Nach dem Entfernen bliebe keine gültige Mediendatei übrig — die Datei ist unvollständig.')
+      }
       steps.push(bytes.length === file.bytes.length ? 'Keine Medien-Tags gefunden' : 'Medien-Tags entfernt')
     } else {
       return failure(file, file.error ?? 'Dieses Format wird nicht unterstützt.')

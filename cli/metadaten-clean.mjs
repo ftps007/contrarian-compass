@@ -6,9 +6,12 @@ import { dirname, extname, join, resolve as resolve2 } from "node:path";
 import { DOMParser as DOMParser2, XMLSerializer as XMLSerializer2 } from "@xmldom/xmldom";
 
 // lib/zip.ts
+var ZipError = class extends Error {
+};
 var SIG_LOCAL = 67324752;
 var SIG_CENTRAL = 33639248;
 var SIG_EOCD = 101010256;
+var FLAG_ENCRYPTED = 1;
 var CRC_TABLE = (() => {
   const table = new Uint32Array(256);
   for (let i = 0; i < 256; i++) {
@@ -37,9 +40,23 @@ function toDosDateTime(date) {
   const dosTime = date.getHours() << 11 | date.getMinutes() << 5 | date.getSeconds() >> 1;
   return { dosTime, dosDate };
 }
+async function mapLimited(items, limit, job) {
+  const results = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (; ; ) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await job(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 async function readZip(buffer) {
   const view = new DataView(buffer);
   const bytes = new Uint8Array(buffer);
+  if (bytes.length < 22) throw new ZipError("Die Datei ist zu klein f\xFCr ein ZIP-Archiv.");
   let eocd = -1;
   const scanStart = Math.max(0, bytes.length - 65535 - 22);
   for (let i = bytes.length - 22; i >= scanStart; i--) {
@@ -48,54 +65,108 @@ async function readZip(buffer) {
       break;
     }
   }
-  if (eocd < 0) throw new Error("Keine g\xFCltige ZIP-Struktur gefunden \u2014 ist das wirklich eine Office-Datei?");
+  if (eocd < 0) throw new ZipError("Keine g\xFCltige ZIP-Struktur gefunden \u2014 ist das wirklich eine Office-Datei?");
   const entryCount = view.getUint16(eocd + 10, true);
-  let offset = view.getUint32(eocd + 16, true);
-  if (offset === 4294967295) throw new Error("ZIP64-Archive werden nicht unterst\xFCtzt.");
-  const entries = [];
+  const directoryOffset = view.getUint32(eocd + 16, true);
+  if (directoryOffset === 4294967295 || entryCount === 65535) throw new ZipError("ZIP64-Archive werden nicht unterst\xFCtzt.");
+  if (directoryOffset + 46 > bytes.length) throw new ZipError("Das Inhaltsverzeichnis des Archivs liegt au\xDFerhalb der Datei.");
+  const headers = [];
+  let offset = directoryOffset;
   for (let i = 0; i < entryCount; i++) {
-    if (view.getUint32(offset, true) !== SIG_CENTRAL) throw new Error("Besch\xE4digtes Central Directory.");
-    const method = view.getUint16(offset + 10, true);
-    const dosTime = view.getUint16(offset + 12, true);
-    const dosDate = view.getUint16(offset + 14, true);
-    const compressedSize = view.getUint32(offset + 20, true);
+    if (offset + 46 > bytes.length || view.getUint32(offset, true) !== SIG_CENTRAL) {
+      throw new ZipError("Besch\xE4digtes Inhaltsverzeichnis im Archiv.");
+    }
     const nameLength = view.getUint16(offset + 28, true);
     const extraLength = view.getUint16(offset + 30, true);
     const commentLength = view.getUint16(offset + 32, true);
-    const externalAttr = view.getUint32(offset + 38, true);
-    const localOffset = view.getUint32(offset + 42, true);
-    const name = new TextDecoder().decode(bytes.subarray(offset + 46, offset + 46 + nameLength));
-    if (view.getUint32(localOffset, true) !== SIG_LOCAL) throw new Error(`Besch\xE4digter Local Header: ${name}`);
+    headers.push({
+      flags: view.getUint16(offset + 8, true),
+      method: view.getUint16(offset + 10, true),
+      dosTime: view.getUint16(offset + 12, true),
+      dosDate: view.getUint16(offset + 14, true),
+      crc: view.getUint32(offset + 16, true),
+      compressedSize: view.getUint32(offset + 20, true),
+      uncompressedSize: view.getUint32(offset + 24, true),
+      externalAttr: view.getUint32(offset + 38, true),
+      localOffset: view.getUint32(offset + 42, true),
+      name: new TextDecoder().decode(bytes.subarray(offset + 46, offset + 46 + nameLength))
+    });
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  const files = headers.filter((h) => !h.name.endsWith("/"));
+  return mapLimited(files, 4, async (header) => {
+    const { name, localOffset, compressedSize } = header;
+    if (header.flags & FLAG_ENCRYPTED) {
+      throw new ZipError(`Das Archiv ist passwortgesch\xFCtzt (${name}) \u2014 bitte zuerst ohne Kennwort speichern.`);
+    }
+    if (header.method !== 0 && header.method !== 8) {
+      throw new ZipError(`Kompressionsverfahren ${header.method} in ${name} wird nicht unterst\xFCtzt.`);
+    }
+    if (localOffset + 30 > bytes.length || view.getUint32(localOffset, true) !== SIG_LOCAL) {
+      throw new ZipError(`Besch\xE4digter Eintrag im Archiv: ${name}`);
+    }
     const localNameLength = view.getUint16(localOffset + 26, true);
     const localExtraLength = view.getUint16(localOffset + 28, true);
     const dataStart = localOffset + 30 + localNameLength + localExtraLength;
-    const raw = bytes.subarray(dataStart, dataStart + compressedSize);
-    if (!name.endsWith("/")) {
-      entries.push({
-        name,
-        data: method === 8 ? await inflateRaw(raw) : new Uint8Array(raw),
-        method,
-        dosTime,
-        dosDate,
-        externalAttr
-      });
+    if (dataStart + compressedSize > bytes.length) {
+      throw new ZipError(`Eintrag ${name} reicht \xFCber das Dateiende hinaus \u2014 das Archiv ist abgeschnitten.`);
     }
-    offset += 46 + nameLength + extraLength + commentLength;
-  }
-  return entries;
+    const raw = bytes.subarray(dataStart, dataStart + compressedSize);
+    let data;
+    try {
+      data = header.method === 8 ? await inflateRaw(raw) : new Uint8Array(raw);
+    } catch {
+      throw new ZipError(`Eintrag ${name} l\xE4sst sich nicht entpacken \u2014 das Archiv ist besch\xE4digt.`);
+    }
+    if (data.length !== header.uncompressedSize || crc32(data) !== header.crc) {
+      throw new ZipError(`Pr\xFCfsumme von ${name} stimmt nicht \u2014 das Archiv ist besch\xE4digt.`);
+    }
+    return {
+      name,
+      data,
+      method: header.method,
+      dosTime: header.dosTime,
+      dosDate: header.dosDate,
+      externalAttr: header.externalAttr,
+      // A view into the input, not a copy: the caller keeps the input alive anyway.
+      source: { data, raw, method: header.method, crc: header.crc }
+    };
+  });
+}
+function looksIncompressible(name, data) {
+  if (/\.(jpe?g|png|gif|webp|mp3|mp4|m4a|mov|zip|docx|xlsx|pptx|woff2?)$/i.test(name)) return true;
+  if (data.length < 4) return false;
+  const b = data;
+  return b[0] === 255 && b[1] === 216 || // JPEG
+  b[0] === 137 && b[1] === 80 || // PNG
+  b[0] === 80 && b[1] === 75 || // ZIP (embedded package)
+  b[0] === 71 && b[1] === 73 && b[2] === 70;
 }
 async function writeZip(entries, timestamp) {
   const encoder2 = new TextEncoder();
+  const seen = /* @__PURE__ */ new Set();
+  for (const entry of entries) {
+    if (seen.has(entry.name)) throw new ZipError(`Doppelter Eintrag im Archiv: ${entry.name}`);
+    seen.add(entry.name);
+  }
+  const payloads = await mapLimited(entries, 4, async (entry) => {
+    const storedAsAsked = entry.method !== 0 || entry.source?.method === 0;
+    if (entry.source && entry.source.data === entry.data && storedAsAsked) {
+      return { payload: entry.source.raw, method: entry.source.method, crc: entry.source.crc };
+    }
+    const crc = crc32(entry.data);
+    if (entry.method === 0 || entry.data.length === 0 || looksIncompressible(entry.name, entry.data)) {
+      return { payload: entry.data, method: 0, crc };
+    }
+    const deflated = await deflateRaw(entry.data);
+    return deflated.length < entry.data.length ? { payload: deflated, method: 8, crc } : { payload: entry.data, method: 0, crc };
+  });
   const localChunks = [];
   const centralChunks = [];
   let offset = 0;
-  for (const entry of entries) {
+  entries.forEach((entry, index) => {
+    const { payload, method, crc } = payloads[index];
     const nameBytes = encoder2.encode(entry.name);
-    const crc = crc32(entry.data);
-    const deflated = entry.data.length > 0 ? await deflateRaw(entry.data) : new Uint8Array(0);
-    const useDeflate = entry.method !== 0 && deflated.length < entry.data.length;
-    const payload = useDeflate ? deflated : entry.data;
-    const method = useDeflate ? 8 : 0;
     const { dosTime, dosDate } = timestamp ? toDosDateTime(timestamp) : { dosTime: entry.dosTime, dosDate: entry.dosDate };
     const local = new Uint8Array(30 + nameBytes.length);
     const localView = new DataView(local.buffer);
@@ -130,7 +201,8 @@ async function writeZip(entries, timestamp) {
     localChunks.push(local, payload);
     centralChunks.push(central);
     offset += local.length + payload.length;
-  }
+  });
+  if (offset >= 4294967295) throw new ZipError("Das Ergebnis w\xE4re gr\xF6\xDFer als 4 GB \u2014 das unterst\xFCtzt dieses Format nicht.");
   const centralSize = centralChunks.reduce((sum, c) => sum + c.length, 0);
   const eocd = new Uint8Array(22);
   const eocdView = new DataView(eocd.buffer);
@@ -169,11 +241,19 @@ var encoder = new TextEncoder();
 function findEntry(entries, name) {
   return entries.find((e) => e.name === name);
 }
+var decoded = /* @__PURE__ */ new WeakMap();
+function decodeText(data) {
+  let text = decoded.get(data);
+  if (text === void 0) {
+    text = decoder.decode(data);
+    decoded.set(data, text);
+  }
+  return text;
+}
 function textOf(entries, name) {
   const entry = findEntry(entries, name);
-  return entry ? decoder.decode(entry.data) : void 0;
+  return entry ? decodeText(entry.data) : void 0;
 }
-var decodeText = (data) => decoder.decode(data);
 var encodeText = (text) => encoder.encode(text);
 function setText(entries, name, xml) {
   const entry = findEntry(entries, name);
@@ -203,7 +283,7 @@ function editParts(entries, matches, edit) {
   const touched = [];
   for (const entry of entries) {
     if (!matches(entry.name)) continue;
-    const xml = decoder.decode(entry.data);
+    const xml = decodeText(entry.data);
     const next = edit(xml, entry.name);
     if (next !== xml) {
       entry.data = encoder.encode(next);
@@ -252,7 +332,7 @@ function removeParts(entries, predicate) {
     setText(entries, CONTENT_TYPES, serializeXml(doc));
   }
   for (const entry of entries.filter((e) => e.name.endsWith(".rels"))) {
-    const doc = parseXml(decoder.decode(entry.data), entry.name);
+    const doc = parseXml(decodeText(entry.data), entry.name);
     let changed = false;
     for (const rel of Array.from(doc.getElementsByTagNameNS(NS.rel, "Relationship"))) {
       if (rel.getAttribute("TargetMode") === "External") continue;
@@ -283,7 +363,7 @@ function removePartsAndReferences(entries, predicate) {
   for (const [owner, ids] of Array.from(danglingByOwner.entries())) {
     const entry = findEntry(entries, owner);
     if (!entry) continue;
-    let xml = decoder.decode(entry.data);
+    let xml = decodeText(entry.data);
     for (const id of ids) {
       xml = xml.replace(new RegExp(`<[^<>]*r:(?:id|embed)="${id}"[^<>]*/>`, "g"), "");
       xml = xml.replace(new RegExp(`\\sr:(?:id|embed)="${id}"`, "g"), "");
@@ -687,6 +767,7 @@ function inspectImage(bytes) {
       }
       if (marker === 218 || marker === 217) break;
       const length = bytes[offset + 2] << 8 | bytes[offset + 3];
+      if (length < 2 || offset + 2 + length > bytes.length) break;
       const dataStart = offset + 4;
       if (marker === 225) {
         if (ascii(bytes, dataStart, 6) === "Exif\0\0") {
@@ -707,6 +788,7 @@ function inspectImage(bytes) {
     while (offset + 8 <= bytes.length) {
       const length = view.getUint32(offset);
       const type = ascii(bytes, offset + 4, 4);
+      if (offset + 12 + length > bytes.length) break;
       if (type === "eXIf") findings.push(...readTiff(bytes, offset + 8));
       else if (type === "tEXt" || type === "zTXt") findings.push({ label: "PNG-Textfeld" });
       else if (type === "iTXt") findings.push({ label: "XMP-Block (Bearbeitungsverlauf)" });
@@ -753,7 +835,7 @@ function stripJpeg(bytes) {
   const out = [bytes.subarray(0, 2)];
   let offset = 2;
   while (offset + 4 <= bytes.length) {
-    if (bytes[offset] !== 255) break;
+    if (bytes[offset] !== 255) return bytes;
     const marker = bytes[offset + 1];
     if (marker === 1 || marker >= 208 && marker <= 215) {
       out.push(bytes.subarray(offset, offset + 2));
@@ -765,6 +847,7 @@ function stripJpeg(bytes) {
       return concat(out);
     }
     const length = bytes[offset + 2] << 8 | bytes[offset + 3];
+    if (length < 2 || offset + 2 + length > bytes.length) return bytes;
     const segment = bytes.subarray(offset, offset + 2 + length);
     const dataStart = offset + 4;
     const isExifOrXmp = marker === 225;
@@ -776,21 +859,26 @@ function stripJpeg(bytes) {
     if (!isExifOrXmp && !isIptc && !isComment && !isOtherApp) out.push(segment);
     offset += 2 + length;
   }
-  return concat(out);
+  return bytes;
 }
 function stripPng(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const out = [bytes.subarray(0, 8)];
   let offset = 8;
+  let sawEnd = false;
   while (offset + 12 <= bytes.length) {
     const length = view.getUint32(offset);
     const type = ascii(bytes, offset + 4, 4);
     const end = offset + 12 + length;
+    if (end > bytes.length) return bytes;
     if (PNG_KEEP.has(type)) out.push(bytes.subarray(offset, end));
-    if (type === "IEND") break;
+    if (type === "IEND") {
+      sawEnd = true;
+      break;
+    }
     offset = end;
   }
-  return concat(out);
+  return sawEnd ? concat(out) : bytes;
 }
 function stripWebp(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -801,6 +889,7 @@ function stripWebp(bytes) {
     const fourcc2 = ascii(bytes, offset, 4);
     const size = view.getUint32(offset + 4, true);
     const padded = size + size % 2;
+    if (offset + 8 + padded > bytes.length) return bytes;
     const chunk = bytes.subarray(offset, offset + 8 + padded);
     if (fourcc2 === "EXIF" || fourcc2 === "XMP ") sawMetadata = true;
     else kept.push(chunk);
@@ -951,18 +1040,17 @@ function scanDeep(entries) {
     });
   }
   const pivotRecords = names.filter((n) => /^xl\/pivotCache\/pivotCacheRecords/.test(n));
-  if (pivotRecords.length > 0) {
-    const rows = pivotRecords.reduce((sum, name) => {
-      const xml = textOf(entries, name) ?? "";
-      return sum + (xml.match(/<r>/g) ?? []).length;
-    }, 0);
+  const pivotDefinitions = names.filter((n) => /^xl\/pivotCache\/pivotCacheDefinition/.test(n));
+  const rows = pivotRecords.reduce((sum, name) => sum + ((textOf(entries, name) ?? "").match(/<r>/g) ?? []).length, 0);
+  const items = pivotDefinitions.reduce((sum, name) => sum + ((textOf(entries, name) ?? "").match(/<sharedItems[^>]*>\s*<[sndbe]\b/g) ?? []).length, 0);
+  if (rows > 0 || items > 0) {
     add({
       id: "pivotCache",
       label: `Pivot-Cache mit ${rows} zwischengespeicherten Datens\xE4tzen`,
       detail: "Der Cache enth\xE4lt die vollst\xE4ndigen Quelldaten der Pivot-Tabelle \u2014 auch dann, wenn das Quellblatt gel\xF6scht wurde.",
       severity: "hoch",
       option: "clearPivotCaches",
-      parts: pivotRecords
+      parts: [...pivotRecords, ...pivotDefinitions]
     });
   }
   const hiddenSheets = listHiddenSheets(entries);
@@ -1918,10 +2006,28 @@ var Lexer = class {
     this.pos++;
     let depth = 1;
     let out = "";
+    const escapes = { 110: "\n", 114: "\r", 116: "	", 98: "\b", 102: "\f" };
     while (this.pos < this.bytes.length) {
       const c = this.bytes[this.pos++];
       if (c === 92) {
-        out += String.fromCharCode(this.bytes[this.pos++]);
+        const next = this.bytes[this.pos++];
+        if (next === void 0) break;
+        if (escapes[next] !== void 0) {
+          out += escapes[next];
+        } else if (next >= 48 && next <= 55) {
+          let code = next - 48;
+          for (let k = 0; k < 2; k++) {
+            const digit = this.bytes[this.pos];
+            if (digit === void 0 || digit < 48 || digit > 55) break;
+            code = code * 8 + (digit - 48);
+            this.pos++;
+          }
+          out += String.fromCharCode(code & 255);
+        } else if (next === 13) {
+          if (this.bytes[this.pos] === 10) this.pos++;
+        } else if (next !== 10) {
+          out += String.fromCharCode(next);
+        }
         continue;
       }
       if (c === 40) depth++;
@@ -1972,15 +2078,29 @@ async function inflate(data) {
 }
 async function parsePdf(bytes) {
   const objects = /* @__PURE__ */ new Map();
+  const positions = /* @__PURE__ */ new Map();
   const trailer = /* @__PURE__ */ new Map();
   const fromObjectStreams = /* @__PURE__ */ new Set();
+  const damaged = /* @__PURE__ */ new Set();
+  const unsupported = [];
+  const define = (num, value, position) => {
+    const current = positions.get(num);
+    if (current !== void 0 && current > position) return;
+    objects.set(num, value);
+    positions.set(num, position);
+  };
   const text = latin1.decode(bytes);
   const objectPattern = /(\d+)\s+(\d+)\s+obj\b/g;
+  const streamPositions = /* @__PURE__ */ new Map();
   let match;
   while (match = objectPattern.exec(text)) {
+    const num = Number(match[1]);
     const lexer = new Lexer(bytes, match.index + match[0].length);
     const value = lexer.parse();
-    objects.set(Number(match[1]), value);
+    define(num, value, match.index);
+    if (value.t === "stream") streamPositions.set(num, match.index);
+    if (!lexer.peekKeyword("endobj")) damaged.add(num);
+    objectPattern.lastIndex = Math.max(objectPattern.lastIndex, lexer.pos);
   }
   const trailerPattern = /trailer\b/g;
   while (match = trailerPattern.exec(text)) {
@@ -1988,44 +2108,70 @@ async function parsePdf(bytes) {
     const value = lexer.parse();
     if (value.t === "dict") for (const [key, entry] of Array.from(value.v.entries())) trailer.set(key, entry);
   }
-  for (const [, value] of Array.from(objects.entries())) {
-    const dict = value.t === "stream" ? value.dict : value.t === "dict" ? value.v : null;
-    if (!dict) continue;
-    const type = dict.get("Type");
-    if (type?.t === "name" && type.v === "XRef") {
-      for (const key of ["Root", "Info", "Encrypt"]) {
-        const entry = dict.get(key);
-        if (entry && !trailer.has(key)) trailer.set(key, entry);
-      }
+  const xrefStreams = Array.from(objects.entries()).filter(([, value]) => {
+    const dict = dictOf(value);
+    const type = dict?.get("Type");
+    return type?.t === "name" && type.v === "XRef";
+  }).sort(([a], [b]) => (positions.get(a) ?? 0) - (positions.get(b) ?? 0));
+  for (const [, value] of xrefStreams) {
+    const dict = dictOf(value);
+    for (const key of ["Root", "Info", "Encrypt"]) {
+      const entry = dict.get(key);
+      if (entry) trailer.set(key, entry);
     }
   }
-  for (const [, value] of Array.from(objects.entries())) {
+  for (const [num, value] of Array.from(objects.entries())) {
     if (value.t !== "stream") continue;
     const type = value.dict.get("Type");
     if (type?.t !== "name" || type.v !== "ObjStm") continue;
     const filter = value.dict.get("Filter");
     const filterName = filter?.t === "name" ? filter.v : filter?.t === "arr" && filter.v[0]?.t === "name" ? filter.v[0].v : "";
+    const params = dictOf(value.dict.get("DecodeParms"));
+    const predictor = params?.get("Predictor");
+    if (filter?.t === "arr" && filter.v.length > 1) {
+      unsupported.push(`Objektstrom ${num} verwendet mehrere Filter.`);
+      continue;
+    }
+    if (filterName !== "" && filterName !== "FlateDecode") {
+      unsupported.push(`Objektstrom ${num} verwendet den Filter ${filterName}.`);
+      continue;
+    }
+    if (predictor?.t === "num" && predictor.v > 1) {
+      unsupported.push(`Objektstrom ${num} verwendet einen Pr\xE4diktor.`);
+      continue;
+    }
     const data = filterName === "FlateDecode" ? await inflate(value.data) : value.data;
-    if (!data) continue;
+    if (!data) {
+      unsupported.push(`Objektstrom ${num} l\xE4sst sich nicht entpacken.`);
+      continue;
+    }
     const count = value.dict.get("N");
     const first = value.dict.get("First");
-    if (count?.t !== "num" || first?.t !== "num") continue;
+    if (count?.t !== "num" || first?.t !== "num") {
+      unsupported.push(`Objektstrom ${num} hat keine g\xFCltige Kopfzeile.`);
+      continue;
+    }
     const header = new Lexer(data, 0);
     const pairs = [];
     for (let i = 0; i < count.v; i++) {
-      const num = Number(header.readToken());
+      const member = Number(header.readToken());
       const offset = Number(header.readToken());
-      if (Number.isNaN(num) || Number.isNaN(offset)) break;
-      pairs.push({ num, offset });
+      if (Number.isNaN(member) || Number.isNaN(offset)) break;
+      pairs.push({ num: member, offset });
     }
+    const position = streamPositions.get(num) ?? 0;
     for (const pair of pairs) {
+      if (first.v + pair.offset >= data.length) {
+        damaged.add(pair.num);
+        continue;
+      }
       const lexer = new Lexer(data, first.v + pair.offset);
-      objects.set(pair.num, lexer.parse());
+      define(pair.num, lexer.parse(), position);
       fromObjectStreams.add(pair.num);
     }
   }
   const revisions = (text.match(/%%EOF/g) ?? []).length;
-  return { objects, trailer, encrypted: trailer.has("Encrypt"), revisions, fromObjectStreams };
+  return { objects, trailer, encrypted: trailer.has("Encrypt"), revisions, fromObjectStreams, damaged, unsupported };
 }
 var resolve = (doc, value) => value?.t === "ref" ? doc.objects.get(value.num) : value;
 function dictOf(value) {
@@ -2075,6 +2221,16 @@ async function readPdf(bytes) {
     } else {
       values[field.key] = "";
     }
+  }
+  const blocker = rewriteBlocker(doc);
+  if (blocker) {
+    findings.push({
+      id: "unsafe",
+      label: "Datei kann nicht sicher neu geschrieben werden",
+      detail: `${blocker} Die Metadaten werden angezeigt, eine Bereinigung wird aber abgelehnt, statt eine besch\xE4digte Datei zu liefern.`,
+      severity: "hoch"
+    });
+    return { values, findings, error: blocker };
   }
   if (info && Array.from(info.keys()).length > 0) {
     const extra = Array.from(info.keys()).filter((key) => !PDF_FIELDS.some((f) => f.key === key));
@@ -2185,6 +2341,31 @@ function countAnnotations(doc) {
   }
   return count;
 }
+function rewriteBlocker(doc) {
+  if (doc.unsupported.length > 0) return doc.unsupported[0];
+  const root = doc.trailer.get("Root");
+  if (!root) return "Im PDF wurde kein Dokumentkatalog gefunden.";
+  if (!dictOf(resolve(doc, root))) return "Der Dokumentkatalog ist unlesbar.";
+  const live = reachable(doc, [root]);
+  const broken = Array.from(doc.damaged).filter((num) => live.has(num));
+  if (broken.length > 0) {
+    return `${broken.length} ben\xF6tigte(s) Objekt(e) sind besch\xE4digt (z. B. Nr. ${broken[0]}).`;
+  }
+  return null;
+}
+function contentStreamCount(doc) {
+  const root = doc.trailer.get("Root");
+  if (!root) return 0;
+  let count = 0;
+  for (const num of Array.from(reachable(doc, [root]))) {
+    const value = doc.objects.get(num);
+    if (value?.t !== "stream") continue;
+    const type = value.dict.get("Type");
+    if (type?.t === "name" && (type.v === "ObjStm" || type.v === "XRef")) continue;
+    count++;
+  }
+  return count;
+}
 function reachable(doc, roots) {
   const seen = /* @__PURE__ */ new Set();
   const queue = [...roots];
@@ -2220,6 +2401,8 @@ async function cleanPdf(bytes, values, options) {
   const doc = await parsePdf(bytes);
   const steps = [];
   if (doc.encrypted) return { bytes, steps, error: "Verschl\xFCsselte PDFs werden nicht ver\xE4ndert." };
+  const blocker = rewriteBlocker(doc);
+  if (blocker) return { bytes, steps, error: `${blocker} Bereinigung abgelehnt.` };
   const rootRef = doc.trailer.get("Root");
   if (!rootRef) return { bytes, steps, error: "Im PDF wurde kein Dokumentkatalog gefunden \u2014 Bereinigung abgelehnt." };
   const root = dictOf(resolve(doc, rootRef));
@@ -2277,6 +2460,7 @@ async function cleanPdf(bytes, values, options) {
     infoEntries.set(field.key, { t: "str", v: field.key.endsWith("Date") ? isoToPdfDate(value) : value, hex: false });
   }
   const pagesBefore = countPages(doc);
+  const streamsBefore = contentStreamCount(doc);
   const live = reachable(doc, [rootRef]);
   const dropped = doc.objects.size - live.size;
   if (dropped > 0 && options.dropOldRevisions) steps.push(`${dropped} nicht erreichbare Objekte weggelassen`);
@@ -2290,6 +2474,22 @@ async function cleanPdf(bytes, values, options) {
       bytes,
       steps,
       error: `Sicherheitspr\xFCfung fehlgeschlagen: vorher ${pagesBefore} Seiten, nachher ${pagesAfter}. Die Datei wurde nicht ver\xE4ndert.`
+    };
+  }
+  const streamsAfter = contentStreamCount(check);
+  if (check.damaged.size > 0 || rewriteBlocker(check)) {
+    return {
+      bytes,
+      steps,
+      error: `Sicherheitspr\xFCfung fehlgeschlagen: das Ergebnis liest sich nicht sauber zur\xFCck (${check.damaged.size} besch\xE4digte Objekte). Die Datei wurde nicht ver\xE4ndert.`
+    };
+  }
+  const removesStreams = options.removeEmbeddedFiles || options.removeXmp || options.removeAnnotations || options.removeJavaScript;
+  if (streamsAfter < streamsBefore && !removesStreams) {
+    return {
+      bytes,
+      steps,
+      error: `Sicherheitspr\xFCfung fehlgeschlagen: ${streamsBefore - streamsAfter} Inhaltsstrom/-str\xF6me fehlen im Ergebnis. Die Datei wurde nicht ver\xE4ndert.`
     };
   }
   if (infoEntries.size > 0) steps.push(`Info-W\xF6rterbuch neu geschrieben (${infoEntries.size} Feld(er))`);
@@ -3036,6 +3236,7 @@ function stripMediaMetadata(bytes) {
     const start = id3v2Length(bytes);
     const end = hasId3v1(bytes) ? bytes.length - 128 : bytes.length;
     if (start === 0 && end === bytes.length) return bytes;
+    if (start >= end) return bytes;
     return bytes.slice(start, end);
   }
   if (format === "mp4") {
@@ -3225,7 +3426,7 @@ async function cleanFile(file, values, customProps, options) {
   let bytes = file.bytes;
   try {
     if (file.kind === "ooxml" && file.entries) {
-      const entries = file.entries.map((e) => ({ ...e, data: new Uint8Array(e.data) }));
+      const entries = file.entries.map((e) => ({ ...e }));
       applyFields(entries, values, "core");
       applyFields(entries, values, "app");
       steps.push("Dokumenteigenschaften geschrieben");
@@ -3259,7 +3460,7 @@ async function cleanFile(file, values, customProps, options) {
       if (timestamp) steps.push("ZIP-Zeitstempel angeglichen");
       bytes = new Uint8Array(await (await writeZip(entries, timestamp)).arrayBuffer());
     } else if (file.kind === "odf" && file.entries) {
-      const entries = file.entries.map((e) => ({ ...e, data: new Uint8Array(e.data) }));
+      const entries = file.entries.map((e) => ({ ...e }));
       writeOdfFields(entries, values);
       steps.push("Dokumenteigenschaften geschrieben");
       steps.push(...cleanOdf(entries, options.odf));
@@ -3285,9 +3486,21 @@ async function cleanFile(file, values, customProps, options) {
       for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 255;
     } else if (file.kind === "image") {
       bytes = stripImageMetadata(file.bytes);
+      if (bytes.length === file.bytes.length && inspectImage(file.bytes).length > 0) {
+        return failure(file, "Die Bilddatei ist besch\xE4digt \u2014 die Metadaten lie\xDFen sich nicht sicher entfernen.");
+      }
+      if (detectFormat(bytes) === "unknown") {
+        return failure(file, "Nach dem Entfernen bliebe kein g\xFCltiges Bild \xFCbrig \u2014 die Datei ist unvollst\xE4ndig.");
+      }
       steps.push(bytes.length === file.bytes.length ? "Keine Bildmetadaten gefunden" : "Bildmetadaten entfernt");
     } else if (file.kind === "media") {
       bytes = stripMediaMetadata(file.bytes);
+      if (bytes.length === file.bytes.length && inspectMedia(file.bytes).length > 0) {
+        return failure(file, "Die Mediendatei ist besch\xE4digt \u2014 die Tags lie\xDFen sich nicht sicher entfernen.");
+      }
+      if (detectMedia(bytes) === "unknown") {
+        return failure(file, "Nach dem Entfernen bliebe keine g\xFCltige Mediendatei \xFCbrig \u2014 die Datei ist unvollst\xE4ndig.");
+      }
       steps.push(bytes.length === file.bytes.length ? "Keine Medien-Tags gefunden" : "Medien-Tags entfernt");
     } else {
       return failure(file, file.error ?? "Dieses Format wird nicht unterst\xFCtzt.");

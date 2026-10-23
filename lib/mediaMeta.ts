@@ -121,6 +121,9 @@ export function stripMediaMetadata(bytes: Uint8Array): Uint8Array {
     const start = id3v2Length(bytes)
     const end = hasId3v1(bytes) ? bytes.length - 128 : bytes.length
     if (start === 0 && end === bytes.length) return bytes
+    // A tag header that claims more bytes than the file has means the file
+    // is truncated — there is no audio left to keep.
+    if (start >= end) return bytes
     return bytes.slice(start, end)
   }
 

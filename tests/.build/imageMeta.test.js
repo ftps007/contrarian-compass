@@ -83,6 +83,7 @@ function inspectImage(bytes2) {
       }
       if (marker === 218 || marker === 217) break;
       const length = bytes2[offset + 2] << 8 | bytes2[offset + 3];
+      if (length < 2 || offset + 2 + length > bytes2.length) break;
       const dataStart = offset + 4;
       if (marker === 225) {
         if (ascii(bytes2, dataStart, 6) === "Exif\0\0") {
@@ -103,6 +104,7 @@ function inspectImage(bytes2) {
     while (offset + 8 <= bytes2.length) {
       const length = view.getUint32(offset);
       const type = ascii(bytes2, offset + 4, 4);
+      if (offset + 12 + length > bytes2.length) break;
       if (type === "eXIf") findings.push(...readTiff(bytes2, offset + 8));
       else if (type === "tEXt" || type === "zTXt") findings.push({ label: "PNG-Textfeld" });
       else if (type === "iTXt") findings.push({ label: "XMP-Block (Bearbeitungsverlauf)" });
@@ -149,7 +151,7 @@ function stripJpeg(bytes2) {
   const out = [bytes2.subarray(0, 2)];
   let offset = 2;
   while (offset + 4 <= bytes2.length) {
-    if (bytes2[offset] !== 255) break;
+    if (bytes2[offset] !== 255) return bytes2;
     const marker = bytes2[offset + 1];
     if (marker === 1 || marker >= 208 && marker <= 215) {
       out.push(bytes2.subarray(offset, offset + 2));
@@ -161,6 +163,7 @@ function stripJpeg(bytes2) {
       return concat(out);
     }
     const length = bytes2[offset + 2] << 8 | bytes2[offset + 3];
+    if (length < 2 || offset + 2 + length > bytes2.length) return bytes2;
     const segment = bytes2.subarray(offset, offset + 2 + length);
     const dataStart = offset + 4;
     const isExifOrXmp = marker === 225;
@@ -172,21 +175,26 @@ function stripJpeg(bytes2) {
     if (!isExifOrXmp && !isIptc && !isComment && !isOtherApp) out.push(segment);
     offset += 2 + length;
   }
-  return concat(out);
+  return bytes2;
 }
 function stripPng(bytes2) {
   const view = new DataView(bytes2.buffer, bytes2.byteOffset, bytes2.byteLength);
   const out = [bytes2.subarray(0, 8)];
   let offset = 8;
+  let sawEnd = false;
   while (offset + 12 <= bytes2.length) {
     const length = view.getUint32(offset);
     const type = ascii(bytes2, offset + 4, 4);
     const end = offset + 12 + length;
+    if (end > bytes2.length) return bytes2;
     if (PNG_KEEP.has(type)) out.push(bytes2.subarray(offset, end));
-    if (type === "IEND") break;
+    if (type === "IEND") {
+      sawEnd = true;
+      break;
+    }
     offset = end;
   }
-  return concat(out);
+  return sawEnd ? concat(out) : bytes2;
 }
 function stripWebp(bytes2) {
   const view = new DataView(bytes2.buffer, bytes2.byteOffset, bytes2.byteLength);
@@ -197,6 +205,7 @@ function stripWebp(bytes2) {
     const fourcc = ascii(bytes2, offset, 4);
     const size = view.getUint32(offset + 4, true);
     const padded = size + size % 2;
+    if (offset + 8 + padded > bytes2.length) return bytes2;
     const chunk = bytes2.subarray(offset, offset + 8 + padded);
     if (fourcc === "EXIF" || fourcc === "XMP ") sawMetadata = true;
     else kept.push(chunk);

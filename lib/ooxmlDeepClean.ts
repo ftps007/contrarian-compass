@@ -132,11 +132,11 @@ export function scanDeep(entries: ZipEntry[]): DeepFinding[] {
 
   // --- pivot caches ---------------------------------------------------------
   const pivotRecords = names.filter((n) => /^xl\/pivotCache\/pivotCacheRecords/.test(n))
-  if (pivotRecords.length > 0) {
-    const rows = pivotRecords.reduce((sum, name) => {
-      const xml = textOf(entries, name) ?? ''
-      return sum + (xml.match(/<r>/g) ?? []).length
-    }, 0)
+  const pivotDefinitions = names.filter((n) => /^xl\/pivotCache\/pivotCacheDefinition/.test(n))
+  const rows = pivotRecords.reduce((sum, name) => sum + ((textOf(entries, name) ?? '').match(/<r>/g) ?? []).length, 0)
+  // Distinct values of every source column are listed in the definitions too.
+  const items = pivotDefinitions.reduce((sum, name) => sum + ((textOf(entries, name) ?? '').match(/<sharedItems[^>]*>\s*<[sndbe]\b/g) ?? []).length, 0)
+  if (rows > 0 || items > 0) {
     add({
       id: 'pivotCache',
       label: `Pivot-Cache mit ${rows} zwischengespeicherten Datensätzen`,
@@ -144,7 +144,7 @@ export function scanDeep(entries: ZipEntry[]): DeepFinding[] {
         'Der Cache enthält die vollständigen Quelldaten der Pivot-Tabelle — auch dann, wenn das Quellblatt gelöscht wurde.',
       severity: 'hoch',
       option: 'clearPivotCaches',
-      parts: pivotRecords,
+      parts: [...pivotRecords, ...pivotDefinitions],
     })
   }
 

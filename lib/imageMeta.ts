@@ -120,6 +120,7 @@ export function inspectImage(bytes: Uint8Array): ImageFinding[] {
       }
       if (marker === 0xda || marker === 0xd9) break
       const length = (bytes[offset + 2] << 8) | bytes[offset + 3]
+      if (length < 2 || offset + 2 + length > bytes.length) break
       const dataStart = offset + 4
       if (marker === 0xe1) {
         if (ascii(bytes, dataStart, 6) === 'Exif\0\0') {
@@ -140,6 +141,7 @@ export function inspectImage(bytes: Uint8Array): ImageFinding[] {
     while (offset + 8 <= bytes.length) {
       const length = view.getUint32(offset)
       const type = ascii(bytes, offset + 4, 4)
+      if (offset + 12 + length > bytes.length) break
       if (type === 'eXIf') findings.push(...readTiff(bytes, offset + 8))
       else if (type === 'tEXt' || type === 'zTXt') findings.push({ label: 'PNG-Textfeld' })
       else if (type === 'iTXt') findings.push({ label: 'XMP-Block (Bearbeitungsverlauf)' })
@@ -203,7 +205,7 @@ function stripJpeg(bytes: Uint8Array): Uint8Array {
   let offset = 2
 
   while (offset + 4 <= bytes.length) {
-    if (bytes[offset] !== 0xff) break
+    if (bytes[offset] !== 0xff) return bytes // not a marker where one must be — leave the file alone
     const marker = bytes[offset + 1]
     if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
       out.push(bytes.subarray(offset, offset + 2))
@@ -216,6 +218,9 @@ function stripJpeg(bytes: Uint8Array): Uint8Array {
       return concat(out)
     }
     const length = (bytes[offset + 2] << 8) | bytes[offset + 3]
+    // A length that runs past the end means a damaged header; a filter that
+    // truncated the image would make things worse, not better.
+    if (length < 2 || offset + 2 + length > bytes.length) return bytes
     const segment = bytes.subarray(offset, offset + 2 + length)
     const dataStart = offset + 4
 
@@ -232,24 +237,30 @@ function stripJpeg(bytes: Uint8Array): Uint8Array {
     offset += 2 + length
   }
 
-  return concat(out)
+  // Ran off the end without a scan: not a JPEG we understand.
+  return bytes
 }
 
 function stripPng(bytes: Uint8Array): Uint8Array {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const out: Uint8Array[] = [bytes.subarray(0, 8)]
   let offset = 8
+  let sawEnd = false
 
   while (offset + 12 <= bytes.length) {
     const length = view.getUint32(offset)
     const type = ascii(bytes, offset + 4, 4)
     const end = offset + 12 + length
+    if (end > bytes.length) return bytes // damaged chunk table — leave the file alone
     if (PNG_KEEP.has(type)) out.push(bytes.subarray(offset, end))
-    if (type === 'IEND') break
+    if (type === 'IEND') {
+      sawEnd = true
+      break
+    }
     offset = end
   }
 
-  return concat(out)
+  return sawEnd ? concat(out) : bytes
 }
 
 function stripWebp(bytes: Uint8Array): Uint8Array {
@@ -262,6 +273,7 @@ function stripWebp(bytes: Uint8Array): Uint8Array {
     const fourcc = ascii(bytes, offset, 4)
     const size = view.getUint32(offset + 4, true)
     const padded = size + (size % 2)
+    if (offset + 8 + padded > bytes.length) return bytes // damaged chunk — leave the file alone
     const chunk = bytes.subarray(offset, offset + 8 + padded)
     if (fourcc === 'EXIF' || fourcc === 'XMP ') sawMetadata = true
     else kept.push(chunk)

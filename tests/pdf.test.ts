@@ -111,3 +111,60 @@ await test('PDF: Nicht-PDF wird sauber abgelehnt', async () => {
   const info = await readPdf(new TextEncoder().encode('Das ist kein PDF'))
   assert(info.error, 'Fremdformat nicht erkannt')
 })
+
+await test('PDF: ein eingebettetes PDF in einem Stream kapert keine Objekte', async () => {
+  // An attachment that is itself a PDF carries "1 0 obj" inside its stream.
+  // Read naively, that would redefine the outer catalogue.
+  const inner = new TextDecoder('latin1').decode(simplePdf())
+  const outer = new TextDecoder('latin1').decode(simplePdf())
+  const injected = outer.replace(
+    '4 0 obj',
+    `12 0 obj\n<< /Type /EmbeddedFile /Length ${inner.length} >>\nstream\n${inner}\nendstream\nendobj\n4 0 obj`
+  )
+  const bytes = new Uint8Array(injected.length)
+  for (let i = 0; i < injected.length; i++) bytes[i] = injected.charCodeAt(i) & 0xff
+
+  const info = await readPdf(bytes)
+  equal(info.error, undefined, `Fehler: ${info.error}`)
+  const result = await cleanPdf(bytes, info.values, DEFAULT_PDF_CLEAN)
+  equal(result.error, undefined, `Fehler: ${result.error}`)
+  const text = asText(result.bytes)
+  includes(text, 'Sichtbarer Seitentext', 'Seiteninhalt des äußeren PDFs verloren')
+  equal((await pdfStructure(result.bytes)).pages, 1, 'Seitenzahl verändert')
+})
+
+await test('PDF: eine spätere direkte Definition schlägt den Objektstrom', async () => {
+  // Object 3 (the page) lives in the object stream; a later incremental
+  // update redefines it directly with a different MediaBox. The update wins.
+  const base = new TextDecoder('latin1').decode(objectStreamPdf())
+  const update =
+    `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Contents 4 0 R >>\nendobj\n` +
+    `trailer\n<< /Root 1 0 R >>\n%%EOF\n`
+  const text = base + update
+  const bytes = new Uint8Array(text.length)
+  for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 0xff
+
+  const result = await cleanPdf(bytes, {}, DEFAULT_PDF_CLEAN)
+  equal(result.error, undefined, `Fehler: ${result.error}`)
+  includes(asText(result.bytes), '/MediaBox [ 0 300 300 ]'.replace('[ 0 300', '[ 0 0 300'), 'Die neuere Definition wurde nicht übernommen')
+})
+
+await test('PDF: Escapes in Zeichenketten werden korrekt gelesen', async () => {
+  const text = new TextDecoder('latin1')
+    .decode(simplePdf())
+    .replace('(Interner Entwurf)', '(Zeile\\nUmbruch \\(Klammer\\) \\101\\102 Ende)')
+  const bytes = new Uint8Array(text.length)
+  for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 0xff
+  const info = await readPdf(bytes)
+  equal(info.values.Title, 'Zeile\nUmbruch (Klammer) AB Ende', 'Escapes falsch aufgelöst')
+})
+
+await test('PDF: ein beschädigtes, benötigtes Objekt führt zur Ablehnung statt zu einer kaputten Datei', async () => {
+  // Cut the page object's dictionary open: "/Contents 4 0 R" loses its closing.
+  const text = new TextDecoder('latin1').decode(simplePdf()).replace('/Contents 4 0 R /Resources', '/Contents 4 0 R /Resources <<')
+  const bytes = new Uint8Array(text.length)
+  for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 0xff
+  const result = await cleanPdf(bytes, {}, DEFAULT_PDF_CLEAN)
+  assert(result.error, 'Beschädigtes Objekt wurde nicht erkannt')
+  equal(result.bytes, bytes, 'Datei wurde trotz Ablehnung verändert')
+})

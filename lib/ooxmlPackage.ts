@@ -36,12 +36,25 @@ export function findEntry(entries: ZipEntry[], name: string): ZipEntry | undefin
   return entries.find((e) => e.name === name)
 }
 
-export function textOf(entries: ZipEntry[], name: string): string | undefined {
-  const entry = findEntry(entries, name)
-  return entry ? decoder.decode(entry.data) : undefined
+/**
+ * Decoded text per byte array. Scanning reads the same parts many times over;
+ * since an edit always replaces the array, caching by identity is exact.
+ */
+const decoded = new WeakMap<Uint8Array, string>()
+
+export function decodeText(data: Uint8Array): string {
+  let text = decoded.get(data)
+  if (text === undefined) {
+    text = decoder.decode(data)
+    decoded.set(data, text)
+  }
+  return text
 }
 
-export const decodeText = (data: Uint8Array) => decoder.decode(data)
+export function textOf(entries: ZipEntry[], name: string): string | undefined {
+  const entry = findEntry(entries, name)
+  return entry ? decodeText(entry.data) : undefined
+}
 export const encodeText = (text: string) => encoder.encode(text)
 
 export function setText(entries: ZipEntry[], name: string, xml: string): void {
@@ -82,7 +95,7 @@ export function editParts(
   const touched: string[] = []
   for (const entry of entries) {
     if (!matches(entry.name)) continue
-    const xml = decoder.decode(entry.data)
+    const xml = decodeText(entry.data)
     const next = edit(xml, entry.name)
     if (next !== xml) {
       entry.data = encoder.encode(next)
@@ -145,7 +158,7 @@ export function removeParts(entries: ZipEntry[], predicate: (name: string) => bo
   }
 
   for (const entry of entries.filter((e) => e.name.endsWith('.rels'))) {
-    const doc = parseXml(decoder.decode(entry.data), entry.name)
+    const doc = parseXml(decodeText(entry.data), entry.name)
     let changed = false
     for (const rel of Array.from(doc.getElementsByTagNameNS(NS.rel, 'Relationship'))) {
       if (rel.getAttribute('TargetMode') === 'External') continue
@@ -188,7 +201,7 @@ export function removePartsAndReferences(entries: ZipEntry[], predicate: (name: 
   for (const [owner, ids] of Array.from(danglingByOwner.entries())) {
     const entry = findEntry(entries, owner)
     if (!entry) continue
-    let xml = decoder.decode(entry.data)
+    let xml = decodeText(entry.data)
     for (const id of ids) {
       // Self-closing elements whose only purpose was the reference.
       xml = xml.replace(new RegExp(`<[^<>]*r:(?:id|embed)="${id}"[^<>]*/>`, 'g'), '')
