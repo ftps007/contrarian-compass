@@ -301,11 +301,15 @@ function renderTemplates() {
           type: field.kind === 'number' ? 'number' : field.kind === 'datetime' ? 'datetime-local' : 'text',
         })
         wert.value = field.kind === 'datetime' ? toLocalInput(entry.value) : entry.value
-        wert.disabled = !entry.checked
+        const zustand = () => {
+          wert.disabled = !entry.checked
+          if (field.kind !== 'datetime') wert.placeholder = entry.checked ? '' : 'wird gelöscht'
+        }
+        zustand()
 
         box.addEventListener('change', () => {
           entry.checked = box.checked
-          wert.disabled = !box.checked
+          zustand()
         })
         wert.addEventListener('input', () => {
           entry.value =

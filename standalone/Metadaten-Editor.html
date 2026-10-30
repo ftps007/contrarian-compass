@@ -63,7 +63,7 @@
       @media (max-width: 45rem) { .grid { grid-template-columns: 1fr; } }
       .field.wide { grid-column: 1 / -1; }
       .field label { display: block; font-size: .8125rem; font-weight: 600; color: var(--stone-600); margin-bottom: .25rem; }
-      .field input, .field textarea {
+      .field input:not([type=checkbox]), .field textarea {
         width: 100%;
         border: 1px solid var(--stone-300);
         border-radius: .375rem;
@@ -114,15 +114,17 @@
       .finding-label { font-size: .875rem; font-weight: 600; color: var(--stone-700); margin: 0; }
 
       .template-note { color: var(--stone-500); font-size: .8125rem; margin-bottom: 1rem; }
-      .template-field label { display: flex; align-items: center; gap: .5rem; }
-      .template-field input[type=checkbox] { accent-color: var(--amber-800); }
-      .template-field input:disabled { background: var(--stone-100); color: var(--stone-500); }
+      .template-field label { display: flex; align-items: center; gap: .5rem; cursor: pointer; margin-bottom: .375rem; }
+      .template-field input[type=checkbox] { width: 1rem; height: 1rem; margin: 0; flex: none; accent-color: var(--amber-800); }
+      .template-field label span { line-height: 1.2; }
+      .template-field input:disabled { background: var(--stone-100); color: var(--stone-500); border-color: var(--stone-200); }
+      .template-field input:disabled::placeholder { color: var(--stone-300); }
       .custom-row { display: flex; align-items: flex-end; gap: .75rem; margin-bottom: .75rem; }
       .custom-row .field { flex: 1; }
       .custom-add { display: flex; align-items: flex-end; gap: .75rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--stone-200); }
       .custom-add .field { flex: 1; }
 
-      .check { display: flex; gap: .75rem; margin-bottom: .85rem; }
+      .check { display: flex; align-items: flex-start; gap: .75rem; margin-bottom: .85rem; }
       .check input { margin-top: .25rem; accent-color: var(--amber-800); }
       .check-label { display: block; font-size: .875rem; font-weight: 600; color: var(--stone-700); }
 
@@ -5215,10 +5217,14 @@ ${xrefOffset}
             type: field.kind === "number" ? "number" : field.kind === "datetime" ? "datetime-local" : "text"
           });
           wert.value = field.kind === "datetime" ? toLocalInput(entry.value) : entry.value;
-          wert.disabled = !entry.checked;
+          const zustand = () => {
+            wert.disabled = !entry.checked;
+            if (field.kind !== "datetime") wert.placeholder = entry.checked ? "" : "wird gel\xF6scht";
+          };
+          zustand();
           box.addEventListener("change", () => {
             entry.checked = box.checked;
-            wert.disabled = !box.checked;
+            zustand();
           });
           wert.addEventListener("input", () => {
             entry.value = field.kind === "datetime" ? wert.value ? toW3CDTF(new Date(wert.value)) : "" : wert.value;
