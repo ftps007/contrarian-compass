@@ -153,3 +153,30 @@ await test('CLI: Anonymisieren sticht einen gesetzten Namen', async () => {
   excludes(text, '<dc:creator>Anon</dc:creator>', 'Gesetzter Name blieb trotz Anonymisierung stehen')
   includes(text, '<dc:creator>Autor ', 'Kein Platzhalter gesetzt')
 })
+
+await test('CLI: --dsgvo ersetzt im Text, --zuordnung schreibt die Liste getrennt', async () => {
+  const dir = await workspace()
+  const entries = docxEntries()
+  const document = entries.find((e) => e.name === 'word/document.xml')!
+  document.data = new TextEncoder().encode(
+    new TextDecoder().decode(document.data).replace('<w:t>Sichtbarer Text.</w:t>', '<w:t>Rückfragen an max.mustermann@firma.de oder Herrn Beispiel.</w:t>')
+  )
+  await writeFile(join(dir, 'brief.docx'), await toZip(entries))
+  const reportPath = join(dir, 'protokoll.txt')
+  const mappingPath = join(dir, 'zuordnung.txt')
+  const { code, output } = await run(['--dsgvo', '--namen', 'Erika Musterfrau', '--bericht', reportPath, '--zuordnung', mappingPath, join(dir, 'brief.docx')])
+  equal(code, 0, `Rückgabewert ${code}, Ausgabe: ${output}`)
+
+  const cleaned = await packageText(join(dir, 'brief-bereinigt.docx'))
+  excludes(cleaned, 'max.mustermann@firma.de', 'E-Mail im Text geblieben')
+  excludes(cleaned, 'Herrn Beispiel', 'Name nach Anrede geblieben')
+  excludes(cleaned, '<cp:lastModifiedBy>Erika Musterfrau', 'Benannter Name in den Eigenschaften geblieben')
+  includes(cleaned, '[E-Mail 1]', 'Platzhalter fehlt')
+
+  const report = await readFile(reportPath, 'utf8')
+  includes(report, 'In Ihrer Verantwortung bleibt', 'Verantwortungsliste fehlt im Protokoll')
+  excludes(report, 'max.mustermann@firma.de', 'Klardaten im Protokoll')
+  const mapping = await readFile(mappingPath, 'utf8')
+  includes(mapping, 'max.mustermann@firma.de', 'Zuordnungsliste ohne Original')
+  includes(output, 'Zuordnungsliste (vertraulich)', 'Hinweis auf die Zuordnungsliste fehlt')
+})

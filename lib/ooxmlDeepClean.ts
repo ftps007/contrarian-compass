@@ -453,7 +453,7 @@ const AUTHOR_PATTERNS = [
   /<author>([^<]+)<\/author>/g,
 ]
 
-function collectAuthors(entries: ZipEntry[]): string[] {
+export function collectAuthors(entries: ZipEntry[]): string[] {
   const authors = new Set<string>()
   for (const entry of entries) {
     if (!isXml(entry.name)) continue

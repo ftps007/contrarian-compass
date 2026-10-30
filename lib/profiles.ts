@@ -4,6 +4,7 @@
  */
 
 import { DEFAULT_OPTIONS, type Options } from './clean'
+import { PII_LABELS } from './pii'
 
 export interface Profile {
   key: string
@@ -41,22 +42,63 @@ export const PROFILES: Profile[] = [
       odf: { ...DEFAULT_OPTIONS.odf, anonymizeAuthors: true },
       pdf: DEFAULT_OPTIONS.pdf,
       rtf: { ...DEFAULT_OPTIONS.rtf, anonymizeAuthors: true },
+      pii: DEFAULT_OPTIONS.pii,
+    },
+  },
+  {
+    key: 'dsgvo',
+    label: 'DSGVO-Bereinigung',
+    description:
+      'Personenbezogene Daten in Eigenschaften und Text durch Platzhalter ersetzen, Namen anonymisieren, versteckte Inhalte entfernen. Ersetzt nicht die rechtliche Prüfung.',
+    options: {
+      base: { ...DEFAULT_OPTIONS.base, stripCustomProps: true, stripComments: true },
+      deep: {
+        ...DEFAULT_OPTIONS.deep,
+        anonymizeAuthors: true,
+        removeSpeakerNotes: true,
+        removeChartWorkbooks: true,
+        removeMacros: true,
+        flattenCroppedImages: true,
+        removeHiddenSheets: true,
+        clearHiddenRowsCols: true,
+        removeHiddenSlides: true,
+        clearPivotCaches: true,
+      },
+      odf: { ...DEFAULT_OPTIONS.odf, anonymizeAuthors: true },
+      pdf: { ...DEFAULT_OPTIONS.pdf, removeAnnotations: true },
+      rtf: { ...DEFAULT_OPTIONS.rtf, anonymizeAuthors: true },
+      pii: { ...DEFAULT_OPTIONS.pii, enabled: true },
     },
   },
   {
     key: 'streng',
     label: 'Streng',
-    description: 'Alles entfernen, was entfernt werden kann — auch Inhalte wie ausgeblendete Blätter und Folien.',
+    description: 'Alles entfernen, was entfernt werden kann — auch Inhalte wie ausgeblendete Blätter und Folien, alle Felder leeren.',
     options: {
       base: all(DEFAULT_OPTIONS.base),
       deep: all(DEFAULT_OPTIONS.deep),
       odf: all(DEFAULT_OPTIONS.odf),
       pdf: all(DEFAULT_OPTIONS.pdf),
       rtf: all(DEFAULT_OPTIONS.rtf),
+      pii: { ...DEFAULT_OPTIONS.pii, enabled: true },
     },
     clearAll: true,
   },
 ]
+
+/** Merges a partial options object (profile file, saved settings) over the defaults. */
+export function mergeOptions(raw: Partial<Record<keyof Options, Record<string, unknown>>> | undefined): Options {
+  const pii = { ...DEFAULT_OPTIONS.pii, ...(raw?.pii ?? {}) }
+  if (!Array.isArray(pii.knownNames)) pii.knownNames = []
+  return {
+    base: { ...DEFAULT_OPTIONS.base, ...(raw?.base ?? {}) },
+    deep: { ...DEFAULT_OPTIONS.deep, ...(raw?.deep ?? {}) },
+    odf: { ...DEFAULT_OPTIONS.odf, ...(raw?.odf ?? {}) },
+    pdf: { ...DEFAULT_OPTIONS.pdf, ...(raw?.pdf ?? {}) },
+    rtf: { ...DEFAULT_OPTIONS.rtf, ...(raw?.rtf ?? {}) },
+    pii,
+  }
+}
 
 export const profileByKey = (key: string): Profile => PROFILES.find((p) => p.key === key) ?? PROFILES[0]
 
@@ -98,6 +140,29 @@ export const OPTION_GROUPS: {
       { key: 'removeChartWorkbooks', label: 'Eingebettete Diagrammdaten entfernen', hint: 'Hinter jedem Diagramm steckt eine vollständige Excel-Mappe.' },
       { key: 'removeMacros', label: 'Makros entfernen', hint: 'Die Datei wird dabei in ein makrofreies Format überführt (.docm → .docx).' },
       { key: 'anonymizeAuthors', label: 'Namen durch „Autor 1, 2, 3" ersetzen', hint: 'Konsistent über Kommentare, Änderungsverfolgung und Eigenschaften hinweg.' },
+    ],
+  },
+  {
+    group: 'pii',
+    title: 'DSGVO: personenbezogene Daten in Eigenschaften und Inhalt',
+    kinds: ['ooxml', 'odf', 'rtf', 'pdf', 'ole2'],
+    items: [
+      {
+        key: 'enabled',
+        label: 'Personenbezogene Daten ersetzen',
+        hint: 'Ersetzt jede Fundstelle konsistent durch einen nummerierten Platzhalter wie „[Person 1]" — in Word, Excel, PowerPoint, OpenDocument und RTF auch im Text, bei PDF nur in den Eigenschaften.',
+      },
+      { key: 'remove', label: 'Löschen statt Platzhalter', hint: 'Entfernt die Stellen ersatzlos. Der Text wird dadurch schwerer lesbar, eine Zuordnungsliste entfällt.' },
+      { key: 'person', label: PII_LABELS.person, hint: 'Namen aus den Dokumenteigenschaften, aus Kommentaren, nach Anrede oder Titel („Frau Dr. …") und aus Grußformeln, dazu die eigene Namensliste.' },
+      { key: 'email', label: PII_LABELS.email, hint: 'Auch in Hyperlinks (mailto:).' },
+      { key: 'phone', label: PII_LABELS.phone, hint: 'Internationale und nationale Schreibweisen mit mindestens sieben Ziffern.' },
+      { key: 'address', label: PII_LABELS.address, hint: 'Straße mit Hausnummer, Postleitzahl und Ort.' },
+      { key: 'birthDate', label: PII_LABELS.birthDate, hint: 'Datumsangaben neben „geb.", „Geburtsdatum" oder „date of birth".' },
+      { key: 'iban', label: PII_LABELS.iban, hint: 'Nur mit gültiger Prüfsumme.' },
+      { key: 'card', label: PII_LABELS.card, hint: 'Nur mit gültiger Luhn-Prüfziffer.' },
+      { key: 'taxId', label: PII_LABELS.taxId, hint: 'Deutsche Steuer-ID mit gültiger Prüfziffer.' },
+      { key: 'socialSecurity', label: PII_LABELS.socialSecurity, hint: 'Deutsche Rentenversicherungsnummer mit gültiger Prüfziffer.' },
+      { key: 'ip', label: PII_LABELS.ip, hint: 'IPv4 und IPv6.' },
     ],
   },
   {

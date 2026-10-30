@@ -6,6 +6,7 @@
  */
 
 import { DEFAULT_OPTIONS, cleanFile, loadFile } from '../lib/clean'
+import { profileByKey } from '../lib/profiles'
 import { readZip, writeZip, ZipError } from '../lib/zip'
 import { docxEntries, pptxEntries, toZip, xlsxEntries } from './fixtures'
 import { assert, equal, jpegWithMetadata, pngWithMetadata, test } from './helpers'
@@ -58,6 +59,12 @@ async function mustSurvive(name: string, original: Uint8Array): Promise<void> {
     let result
     try {
       result = await cleanFile(file, file.values, file.customProps, DEFAULT_OPTIONS)
+      // The DSGVO path parses and rewrites the content parts — it must be just as sturdy.
+      const gdpr = await cleanFile(file, file.values, file.customProps, profileByKey('dsgvo').options)
+      if (!gdpr.error) {
+        const again = await loadFile(gdpr.fileName, gdpr.bytes)
+        assert(!again.error, `${name} ${label}: DSGVO-Ergebnis liest sich nicht zurück: ${again.error}`)
+      }
     } catch (err) {
       throw new Error(`${name} ${label}: cleanFile hat eine Ausnahme geworfen: ${err instanceof Error ? err.message : err}`)
     }

@@ -29,9 +29,27 @@ import {
   type DeepOptions,
 } from './ooxmlDeepClean'
 import { removeParts } from './ooxmlPackage'
-import { DEFAULT_ODF_CLEAN, ODF_FIELDS, cleanOdf, isOdfPackage, readOdfFields, scanOdf, sortOdfEntries, writeOdfFields, type OdfCleanOptions } from './odf'
-import { DEFAULT_PDF_CLEAN, PDF_FIELDS, cleanPdf, readPdf, type PdfCleanOptions } from './pdf'
-import { DEFAULT_RTF_CLEAN, RTF_FIELDS, cleanRtf, isRtf, readRtfFields, scanRtf, writeRtfFields, type RtfCleanOptions } from './rtf'
+import { collectAuthors } from './ooxmlDeepClean'
+import { DEFAULT_ODF_CLEAN, ODF_FIELDS, cleanOdf, collectOdfAuthors, isOdfPackage, readOdfFields, scanOdf, sortOdfEntries, writeOdfFields, type OdfCleanOptions } from './odf'
+import { DEFAULT_PDF_CLEAN, PDF_FIELDS, cleanPdf, extractPdfText, readPdf, type PdfCleanOptions } from './pdf'
+import { DEFAULT_RTF_CLEAN, RTF_FIELDS, cleanRtf, collectRevisionAuthors, isRtf, readRtfFields, scanRtf, writeRtfFields, type RtfCleanOptions } from './rtf'
+import {
+  DEFAULT_PII_CLEAN,
+  GDPR_RESPONSIBILITIES,
+  PII_LABELS,
+  Pseudonymizer,
+  addCounts,
+  countByCategory,
+  describeCounts,
+  findPii,
+  piiOptionsFrom,
+  totalCount,
+  type PiiCleanOptions,
+  type PiiMatch,
+  type PiiOptions,
+  type PiiSummary,
+} from './pii'
+import { applyOdfPii, applyOoxmlPii, applyRtfPii, scanOdfPii, scanOoxmlPii, scanRtfPii } from './piiDocument'
 import { OLE2_FIELDS, isOle2, readOle2, writeOle2 } from './ole2'
 import { detectFormat, inspectImage, stripImageMetadata } from './imageMeta'
 import { detectMedia, inspectMedia, stripMediaMetadata } from './mediaMeta'
@@ -81,6 +99,8 @@ export interface Options {
   odf: OdfCleanOptions
   pdf: PdfCleanOptions
   rtf: RtfCleanOptions
+  /** Personal data in properties and content (the "DSGVO" switches). */
+  pii: PiiCleanOptions
 }
 
 export const DEFAULT_OPTIONS: Options = {
@@ -89,6 +109,7 @@ export const DEFAULT_OPTIONS: Options = {
   odf: DEFAULT_ODF_CLEAN,
   pdf: DEFAULT_PDF_CLEAN,
   rtf: DEFAULT_RTF_CLEAN,
+  pii: DEFAULT_PII_CLEAN,
 }
 
 const OOXML_EXT = ['.docx', '.docm', '.dotx', '.dotm', '.xlsx', '.xlsm', '.xltx', '.xltm', '.pptx', '.pptm', '.potx', '.ppsx', '.ppsm']
@@ -133,7 +154,38 @@ const officeFields = (): Field[] =>
     group: field.part === 'core' ? 'Dokumenteigenschaften' : 'Erweiterte Eigenschaften',
   }))
 
-export async function loadFile(name: string, bytes: Uint8Array): Promise<LoadedFile> {
+/** Names recorded in the file's own properties — treated as personal data in the text. */
+const NAME_KEYS = ['creator', 'lastModifiedBy', 'manager', 'initial-creator', 'printed-by', 'author', 'operator', 'Author']
+
+function knownNamesOf(file: LoadedFile): string[] {
+  const names = NAME_KEYS.map((key) => file.values[key] ?? '').filter((value) => value !== '')
+  if (file.kind === 'ooxml' && file.entries) names.push(...collectAuthors(file.entries))
+  if (file.kind === 'odf' && file.entries) names.push(...collectOdfAuthors(file.entries))
+  if (file.kind === 'rtf' && file.text !== undefined) names.push(...collectRevisionAuthors(file.text))
+  return names
+}
+
+/** Personal data in the content, as a finding with a few examples per category. */
+function piiFinding(matches: PiiMatch[], manual: boolean): Finding | null {
+  if (matches.length === 0) return null
+  const counts = countByCategory(matches)
+  const examples: string[] = []
+  for (const category of Object.keys(counts) as (keyof typeof counts)[]) {
+    const values = Array.from(new Set(matches.filter((m) => m.category === category).map((m) => m.value.replace(/\s+/g, ' ')))).slice(0, 3)
+    examples.push(`${PII_LABELS[category]}: ${values.join(', ')}${(counts[category] ?? 0) > 3 ? ', …' : ''}`)
+  }
+  return {
+    id: 'pii',
+    label: `Personenbezogene Daten im Inhalt: ${describeCounts(counts)}`,
+    detail: manual
+      ? `${examples.join(' · ')} — Der Text eines PDF wird hier nicht verändert; die Stellen müssen im Quelldokument bereinigt werden.`
+      : `${examples.join(' · ')} — Mit der DSGVO-Bereinigung werden sie durch nummerierte Platzhalter ersetzt.`,
+    severity: 'hoch',
+    option: manual ? undefined : 'enabled',
+  }
+}
+
+export async function loadFile(name: string, bytes: Uint8Array, piiScan: PiiCleanOptions = DEFAULT_PII_CLEAN): Promise<LoadedFile> {
   const base: LoadedFile = {
     name,
     size: bytes.length,
@@ -263,6 +315,35 @@ export async function loadFile(name: string, bytes: Uint8Array): Promise<LoadedF
     base.error = err instanceof Error ? err.message : 'Die Datei konnte nicht gelesen werden.'
   }
 
+  // Content check for personal data — independent of whether replacing is switched on.
+  if (!base.error) {
+    try {
+      const options = piiOptionsFrom(piiScan, knownNamesOf(base))
+      let matches: PiiMatch[] = []
+      let manual = false
+      if (base.kind === 'ooxml' && base.entries) matches = scanOoxmlPii(base.entries, options)
+      else if (base.kind === 'odf' && base.entries) matches = scanOdfPii(base.entries, options)
+      else if (base.kind === 'rtf' && base.text !== undefined) matches = scanRtfPii(base.text, options)
+      else if (base.kind === 'pdf') {
+        manual = true
+        const extracted = await extractPdfText(bytes)
+        matches = findPii(extracted.text, options)
+        if (extracted.partial) {
+          base.findings.push({
+            id: 'piiUnreadable',
+            label: 'Teile des PDF-Textes nicht prüfbar',
+            detail: 'Schriften mit CID-Kodierung liefern keine lesbaren Zeichen. Diese Passagen müssen im Quelldokument geprüft werden.',
+            severity: 'mittel',
+          })
+        }
+      }
+      const finding = piiFinding(matches, manual)
+      if (finding) base.findings.push(finding)
+    } catch {
+      // The content check must never make a file unloadable.
+    }
+  }
+
   return base
 }
 
@@ -274,8 +355,47 @@ export interface CleanResult {
   sha256After: string
   /** Findings that are still there afterwards — the verification pass. */
   remaining: Finding[]
+  /** Present when the DSGVO switches were on. */
+  pii?: PiiSummary
   error?: string
 }
+
+/** The pseudonymiser for one file, fed with the names the file itself records. */
+function piiContext(file: LoadedFile, options: Options): { options: PiiOptions; pseudonymizer: Pseudonymizer; summary: PiiSummary } | null {
+  if (!options.pii.enabled) return null
+  const piiOptions = piiOptionsFrom(options.pii, knownNamesOf(file))
+  return { options: piiOptions, pseudonymizer: new Pseudonymizer(piiOptions), summary: { replaced: {}, mapping: [], notes: [] } }
+}
+
+/** Property values are text too — the author field is the most personal datum of all. */
+function pseudonymizeValues(
+  file: LoadedFile,
+  values: Record<string, string>,
+  customProps: CustomProp[],
+  context: NonNullable<ReturnType<typeof piiContext>>
+): { values: Record<string, string>; customProps: CustomProp[]; replaced: PiiSummary['replaced'] } {
+  const replaced: PiiSummary['replaced'] = {}
+  const next = { ...values }
+  const textKeys = new Set(file.fields.filter((f) => f.kind === 'text' || f.kind === 'longtext').map((f) => f.key))
+  for (const key of Object.keys(next)) {
+    if (!textKeys.has(key) || !next[key]) continue
+    const matches = findPii(next[key], context.options)
+    if (matches.length === 0) continue
+    next[key] = context.pseudonymizer.apply(next[key]).text
+    addCounts(replaced, countByCategory(matches))
+  }
+  const props = customProps.map((prop) => {
+    if (typeof prop.value !== 'string' || !prop.value) return prop
+    const matches = findPii(prop.value, context.options)
+    if (matches.length === 0) return prop
+    addCounts(replaced, countByCategory(matches))
+    return { ...prop, value: context.pseudonymizer.apply(prop.value).text }
+  })
+  return { values: next, customProps: props, replaced }
+}
+
+const piiStep = (where: string, replaced: PiiSummary['replaced'], remove: boolean) =>
+  `${remove ? 'Gelöscht' : 'Pseudonymisiert'} ${where}: ${describeCounts(replaced)}`
 
 export async function cleanFile(
   file: LoadedFile,
@@ -286,10 +406,27 @@ export async function cleanFile(
   const steps: string[] = []
   let fileName = file.name
   let bytes = file.bytes
+  const pii = piiContext(file, options)
+  if (pii) {
+    const properties = pseudonymizeValues(file, values, customProps, pii)
+    values = properties.values
+    customProps = properties.customProps
+    if (totalCount(properties.replaced) > 0) {
+      steps.push(piiStep('in den Eigenschaften', properties.replaced, options.pii.remove))
+      addCounts(pii.summary.replaced, properties.replaced)
+    }
+  }
 
   try {
     if (file.kind === 'ooxml' && file.entries) {
       const entries = file.entries.map((e) => ({ ...e })) // data arrays are never edited in place, so sharing them is safe
+      if (pii) {
+        const content = applyOoxmlPii(entries, pii.options, pii.pseudonymizer)
+        if (content.parts.length > 0) {
+          steps.push(`${piiStep('im Inhalt', content.replaced, options.pii.remove)} (${content.parts.length} Teil(e))`)
+          addCounts(pii.summary.replaced, content.replaced)
+        }
+      }
       applyFields(entries, values, 'core')
       applyFields(entries, values, 'app')
       steps.push('Dokumenteigenschaften geschrieben')
@@ -327,6 +464,13 @@ export async function cleanFile(
       bytes = new Uint8Array(await (await writeZip(entries, timestamp)).arrayBuffer())
     } else if (file.kind === 'odf' && file.entries) {
       const entries = file.entries.map((e) => ({ ...e })) // data arrays are never edited in place, so sharing them is safe
+      if (pii) {
+        const content = applyOdfPii(entries, pii.options, pii.pseudonymizer)
+        if (content.parts.length > 0) {
+          steps.push(piiStep('im Inhalt', content.replaced, options.pii.remove))
+          addCounts(pii.summary.replaced, content.replaced)
+        }
+      }
       writeOdfFields(entries, values)
       steps.push('Dokumenteigenschaften geschrieben')
       steps.push(...cleanOdf(entries, options.odf))
@@ -338,13 +482,25 @@ export async function cleanFile(
       if (result.error) return failure(file, result.error)
       bytes = result.bytes
       steps.push(...result.steps)
+      if (pii && file.findings.some((f) => f.id === 'pii')) {
+        pii.summary.notes.push('Der Seitentext des PDF wurde nicht verändert — personenbezogene Daten darin müssen im Quelldokument bereinigt werden.')
+      }
     } else if (file.kind === 'ole2') {
       const result = writeOle2(file.bytes, values)
       if (result.error) return failure(file, result.error)
       bytes = result.bytes
       steps.push(...result.steps)
     } else if (file.kind === 'rtf' && file.text !== undefined) {
-      let text = writeRtfFields(file.text, values)
+      let text = file.text
+      if (pii) {
+        const content = applyRtfPii(text, pii.options, pii.pseudonymizer)
+        if (totalCount(content.replaced) > 0) {
+          text = content.text
+          steps.push(piiStep('im Inhalt', content.replaced, options.pii.remove))
+          addCounts(pii.summary.replaced, content.replaced)
+        }
+      }
+      text = writeRtfFields(text, values)
       const result = cleanRtf(text, options.rtf)
       text = result.text
       steps.push('Dokumenteigenschaften geschrieben', ...result.steps)
@@ -376,7 +532,17 @@ export async function cleanFile(
   }
 
   // Verification pass: read the result back and see what a scan still finds.
-  const verified = await loadFile(fileName, bytes)
+  const verified = await loadFile(fileName, bytes, options.pii)
+
+  if (pii) {
+    pii.summary.mapping = pii.pseudonymizer.mapping()
+    if (file.kind === 'ole2' || file.kind === 'image' || file.kind === 'media') {
+      pii.summary.notes.push('Für dieses Format gibt es keine Inhaltsprüfung; nur die Eigenschaften wurden behandelt.')
+    }
+    if (file.findings.some((f) => f.id === 'trackedChanges')) {
+      pii.summary.notes.push('Nachverfolgte Änderungen enthalten Namen und Zeitpunkte und müssen im Programm angenommen werden.')
+    }
+  }
 
   return {
     bytes,
@@ -385,6 +551,7 @@ export async function cleanFile(
     sha256Before: file.sha256,
     sha256After: await sha256(bytes),
     remaining: verified.findings,
+    pii: pii?.summary,
   }
 }
 
@@ -422,14 +589,21 @@ export interface ReportEntry {
   findingsBefore: Finding[]
   steps: string[]
   remaining: Finding[]
+  pii?: PiiSummary
   error?: string
 }
 
 export function buildReportText(entries: ReportEntry[], generatedAt: string): string {
   const lines: string[] = []
-  lines.push('Metadaten-Bereinigung — Protokoll')
+  const gdpr = entries.some((entry) => entry.pii)
+  lines.push(gdpr ? 'Metadaten- und DSGVO-Bereinigung — Protokoll' : 'Metadaten-Bereinigung — Protokoll')
   lines.push(`Erstellt: ${generatedAt}`)
   lines.push(`Dateien: ${entries.length}`)
+  if (gdpr) {
+    lines.push('')
+    lines.push('Dieses Protokoll belegt eine technische Maßnahme (Art. 32 DSGVO). Es bescheinigt keine')
+    lines.push('DSGVO-Konformität — die ergibt sich aus der Verarbeitung insgesamt, siehe den Abschnitt am Ende.')
+  }
   lines.push('')
 
   for (const entry of entries) {
@@ -452,6 +626,13 @@ export function buildReportText(entries: ReportEntry[], generatedAt: string): st
     lines.push(`Durchgeführt (${entry.steps.length}):`)
     for (const step of entry.steps) lines.push(`  - ${step}`)
     lines.push('')
+    if (entry.pii) {
+      const total = totalCount(entry.pii.replaced)
+      lines.push(`DSGVO-Bereinigung: ${total === 0 ? 'keine personenbezogenen Daten in Eigenschaften und Inhalt gefunden.' : `${total} Stelle(n) ersetzt — ${describeCounts(entry.pii.replaced)}.`}`)
+      if (entry.pii.mapping.length > 0) lines.push(`  ${entry.pii.mapping.length} Platzhalter vergeben; die Zuordnungsliste liegt getrennt vor.`)
+      for (const note of entry.pii.notes) lines.push(`  Hinweis: ${note}`)
+      lines.push('')
+    }
     if (entry.remaining.length === 0) {
       lines.push('Nachkontrolle: keine Funde mehr.')
     } else {
@@ -461,5 +642,37 @@ export function buildReportText(entries: ReportEntry[], generatedAt: string): st
     lines.push('')
   }
 
+  if (gdpr) {
+    lines.push('='.repeat(72))
+    lines.push('In Ihrer Verantwortung bleibt')
+    lines.push('')
+    for (const item of GDPR_RESPONSIBILITIES) lines.push(`  - ${item}`)
+    lines.push('')
+  }
+
   return lines.join('\n')
 }
+
+/**
+ * Placeholder → original, for every file. This is the key to the
+ * pseudonymisation and therefore itself personal data: it is written as a
+ * separate file so the report can be handed on and this one locked away.
+ */
+export function buildMappingText(entries: ReportEntry[], generatedAt: string): string {
+  const lines: string[] = []
+  lines.push('Zuordnungsliste der Pseudonyme — VERTRAULICH')
+  lines.push(`Erstellt: ${generatedAt}`)
+  lines.push('Getrennt vom Protokoll und von den Dokumenten aufbewahren (Art. 4 Nr. 5 DSGVO).')
+  lines.push('')
+  for (const entry of entries) {
+    if (!entry.pii || entry.pii.mapping.length === 0) continue
+    lines.push('='.repeat(72))
+    lines.push(`Datei:    ${entry.file}`)
+    for (const item of entry.pii.mapping) lines.push(`  ${item.token.padEnd(20)} ${PII_LABELS[item.category].padEnd(30)} ${item.original}`)
+    lines.push('')
+  }
+  if (lines.length === 4) lines.push('Keine Platzhalter vergeben.')
+  return lines.join('\n')
+}
+
+export const hasMapping = (entries: ReportEntry[]): boolean => entries.some((entry) => (entry.pii?.mapping.length ?? 0) > 0)

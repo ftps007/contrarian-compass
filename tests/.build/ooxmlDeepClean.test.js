@@ -1977,6 +1977,10 @@ function scanOdf(entries) {
   }
   return findings;
 }
+function collectOdfAuthors(entries) {
+  const content = textOf(entries, "content.xml") ?? "";
+  return Array.from(new Set(Array.from(content.matchAll(/<dc:creator>([^<]+)<\/dc:creator>/g)).map((m) => m[1].trim())));
+}
 function cleanOdf(entries, options) {
   const steps = [];
   if (options.removeThumbnail) {
@@ -2631,6 +2635,90 @@ function serializeString(value) {
   }
   return `(${value.replace(/[\\()]/g, (c) => "\\" + c)})`;
 }
+async function extractPdfText(bytes2) {
+  const doc = await parsePdf(bytes2);
+  const pieces = [];
+  let partial = false;
+  for (const value of Array.from(doc.objects.values())) {
+    if (value.t !== "stream") continue;
+    const type = value.dict.get("Type");
+    const subtype = value.dict.get("Subtype");
+    if (type?.t === "name" && !["XObject", "Pattern"].includes(type.v)) continue;
+    if (subtype?.t === "name" && subtype.v === "Image") continue;
+    const filter = value.dict.get("Filter");
+    const filterName = filter?.t === "name" ? filter.v : filter?.t === "arr" && filter.v[0]?.t === "name" ? filter.v[0].v : "";
+    if (filter?.t === "arr" && filter.v.length > 1) continue;
+    if (filterName !== "" && filterName !== "FlateDecode") continue;
+    const data = filterName === "FlateDecode" ? await inflate(value.data) : value.data;
+    if (!data) continue;
+    const content = latin1.decode(data);
+    if (!content.includes("BT")) continue;
+    const extracted = textFromContentStream(content);
+    if (extracted.partial) partial = true;
+    if (extracted.text.trim() !== "") pieces.push(extracted.text);
+  }
+  for (const value of Array.from(doc.objects.values())) {
+    const dict = dictOf(value);
+    if (!dict) continue;
+    const type = dict.get("Type");
+    if (type?.t !== "name" || type.v !== "Annot") continue;
+    for (const key of ["Contents", "T", "V", "RC", "Subj"]) {
+      const entry2 = dict.get(key);
+      if (entry2?.t === "str" && entry2.v) pieces.push(decodePdfText(entry2.v));
+    }
+  }
+  return { text: pieces.join("\n"), partial };
+}
+function textFromContentStream(content) {
+  const out = [];
+  let partial = false;
+  const blocks = /BT\b([\s\S]*?)\bET\b/g;
+  let block;
+  while (block = blocks.exec(content)) {
+    const body = block[1];
+    let line = "";
+    const tokens = /\((?:[^()\\]|\\[\s\S])*\)|<[0-9A-Fa-f\s]*>|-?\d+(?:\.\d+)?|\b(?:T\*|Td|TD|Tm|Tj|TJ|')\b|"/g;
+    let token;
+    let lastNumber = 0;
+    while (token = tokens.exec(body)) {
+      const t = token[0];
+      if (t.startsWith("(")) {
+        line += decodeLiteral(t);
+        lastNumber = 0;
+      } else if (t.startsWith("<")) {
+        const decoded2 = decodeHex(t);
+        if (decoded2 === null) partial = true;
+        else line += decoded2;
+        lastNumber = 0;
+      } else if (/^-?\d/.test(t)) {
+        lastNumber = Number(t);
+        if (lastNumber < -150) line += " ";
+      } else if (t === "T*" || t === "Td" || t === "TD" || t === "Tm" || t === "'" || t === '"') {
+        if (line !== "") out.push(line);
+        line = "";
+      }
+    }
+    if (line !== "") out.push(line);
+  }
+  return { text: out.join("\n"), partial };
+}
+function decodeLiteral(token) {
+  const bytes2 = new Uint8Array(token.length);
+  for (let i = 0; i < token.length; i++) bytes2[i] = token.charCodeAt(i) & 255;
+  const lexer = new Lexer(bytes2, 0);
+  const value = lexer.parse();
+  return value.t === "str" ? decodePdfText(value.v) : "";
+}
+function decodeHex(token) {
+  const hex = token.replace(/[^0-9A-Fa-f]/g, "");
+  let text = "";
+  for (let i = 0; i + 1 < hex.length; i += 2) text += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+  if (text.startsWith("\xFE\xFF")) return decodePdfText(text);
+  const readable = text.replace(/[^\x20-\x7e\xa0-\xff]/g, "").length;
+  if (text.length === 0) return "";
+  if (readable / text.length < 0.9) return null;
+  return text;
+}
 var DEFAULT_PDF_CLEAN, PDF_FIELDS, isWhite, isDelim, latin1, Lexer, decodeName, resolve;
 var init_pdf = __esm({
   "lib/pdf.ts"() {
@@ -3037,6 +3125,744 @@ var init_rtf = __esm({
       removeRevisionTable: true,
       anonymizeAuthors: false
     };
+  }
+});
+
+// lib/pii.ts
+function piiOptionsFrom(clean, extraNames = []) {
+  const names = /* @__PURE__ */ new Set();
+  for (const name of [...clean.knownNames, ...extraNames]) {
+    const trimmed = name.trim();
+    if (trimmed.length >= 3 && !/^Autor \d+$/.test(trimmed) && !/^\[.*\]$/.test(trimmed) && /[A-Za-zÄÖÜäöüß]/.test(trimmed)) names.add(trimmed);
+  }
+  return {
+    categories: Object.fromEntries(PII_CATEGORIES.map((category) => [category, Boolean(clean[category])])),
+    knownNames: Array.from(names),
+    mode: clean.remove ? "entfernen" : "pseudonymisieren"
+  };
+}
+function isValidIban(candidate) {
+  const iban = candidate.replace(/\s+/g, "").toUpperCase();
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(iban)) return false;
+  const rearranged = iban.slice(4) + iban.slice(0, 4);
+  let remainder = 0;
+  for (const char of rearranged) {
+    const digits = /[A-Z]/.test(char) ? String(char.charCodeAt(0) - 55) : char;
+    for (const d of digits) remainder = (remainder * 10 + Number(d)) % 97;
+  }
+  return remainder === 1;
+}
+function passesLuhn(candidate) {
+  const digits = candidate.replace(/[\s-]/g, "");
+  if (!/^\d{13,19}$/.test(digits)) return false;
+  let sum = 0;
+  let double = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let d = Number(digits[i]);
+    if (double) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+    double = !double;
+  }
+  return sum % 10 === 0;
+}
+function isValidGermanTaxId(candidate) {
+  const id = candidate.replace(/[\s/]/g, "");
+  if (!/^[1-9]\d{10}$/.test(id)) return false;
+  const counts = /* @__PURE__ */ new Map();
+  for (const d of id.slice(0, 10)) counts.set(d, (counts.get(d) ?? 0) + 1);
+  const repeated = Array.from(counts.values()).filter((n) => n > 1);
+  if (repeated.length !== 1 || repeated[0] > 3) return false;
+  let product = 10;
+  for (const d of id.slice(0, 10)) {
+    let sum = (Number(d) + product) % 10;
+    if (sum === 0) sum = 10;
+    product = sum * 2 % 11;
+  }
+  let check = 11 - product;
+  if (check === 10) check = 0;
+  return check === Number(id[10]);
+}
+function isValidGermanSocialSecurity(candidate) {
+  const number = candidate.replace(/\s+/g, "").toUpperCase();
+  if (!/^\d{8}[A-Z]\d{3}$/.test(number)) return false;
+  const letterValue = String(number.charCodeAt(8) - 64).padStart(2, "0");
+  const digits = number.slice(0, 8) + letterValue + number.slice(9, 11);
+  const weights = [2, 1, 2, 5, 7, 1, 2, 1, 2, 1, 2, 1];
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    const product = Number(digits[i]) * weights[i];
+    sum += product >= 10 ? Math.floor(product / 10) + product % 10 : product;
+  }
+  return sum % 10 === Number(number[11]);
+}
+function findPii(text, options = DEFAULT_PII_OPTIONS) {
+  const matches = [];
+  const on = options.categories;
+  const scan = (category, pattern, accept, group = 0) => {
+    pattern.lastIndex = 0;
+    let match;
+    while (match = pattern.exec(text)) {
+      const value = match[group] ?? match[0];
+      if (value === void 0 || value === "") {
+        if (match[0].length === 0) pattern.lastIndex++;
+        continue;
+      }
+      if (accept && !accept(value)) continue;
+      const start = group === 0 ? match.index : match.index + match[0].indexOf(value);
+      matches.push({ category, start, end: start + value.length, value });
+    }
+  };
+  if (on.email) scan("email", EMAIL);
+  if (on.iban) scan("iban", IBAN, isValidIban);
+  if (on.card) scan("card", CARD, (v) => passesLuhn(v) && !isValidIban(v));
+  if (on.taxId) scan("taxId", TAX_ID, isValidGermanTaxId);
+  if (on.socialSecurity) scan("socialSecurity", SOCIAL, isValidGermanSocialSecurity);
+  if (on.ip) {
+    scan("ip", IPV4);
+    scan("ip", IPV6, (v) => v.includes(":") && /[a-fA-F]|::/.test(v) ? true : v.split(":").length >= 4);
+  }
+  if (on.birthDate) {
+    BIRTH_DATE.lastIndex = 0;
+    let match;
+    while (match = BIRTH_DATE.exec(text)) {
+      const value = match[1] ?? match[2];
+      if (!value) continue;
+      const start = match.index + match[0].indexOf(value);
+      matches.push({ category: "birthDate", start, end: start + value.length, value });
+    }
+  }
+  if (on.address) scan("address", ADDRESS);
+  if (on.phone) scan("phone", PHONE, (v) => v.replace(/\D/g, "").length >= 7 && v.replace(/\D/g, "").length <= 15);
+  if (on.person) {
+    scan("person", SALUTED_NAME, void 0, 1);
+    scan("person", SIGNATURE_NAME, void 0, 1);
+    for (const name of options.knownNames) {
+      const trimmed = name.trim();
+      if (trimmed.length < 3) continue;
+      scan("person", new RegExp(`(?<![\\w\xE4\xF6\xFC\xDF])${escapeRegex(trimmed)}(?![\\w\xE4\xF6\xFC\xDF])`, "g"));
+    }
+  }
+  const priority = ["iban", "card", "taxId", "socialSecurity", "email", "address", "birthDate", "phone", "ip", "person"];
+  matches.sort((a, b) => a.start - b.start || b.end - b.start - (a.end - a.start) || priority.indexOf(a.category) - priority.indexOf(b.category));
+  const resolved = [];
+  let cursor = -1;
+  for (const match of matches) {
+    if (match.start < cursor) continue;
+    resolved.push(match);
+    cursor = match.end;
+  }
+  return resolved;
+}
+function addCounts(target, extra) {
+  for (const category of PII_CATEGORIES) {
+    const n = extra[category];
+    if (n) target[category] = (target[category] ?? 0) + n;
+  }
+}
+function describeCounts(counts) {
+  const plural = {
+    email: "E-Mail-Adressen",
+    phone: "Telefonnummern",
+    iban: "IBANs",
+    card: "Kartennummern",
+    taxId: "Steuer-IDs",
+    socialSecurity: "Sozialversicherungsnummern",
+    ip: "IP-Adressen",
+    birthDate: "Geburtsdaten",
+    address: "Postanschriften",
+    person: "Personennamen"
+  };
+  return PII_CATEGORIES.filter((category) => counts[category]).map((category) => `${counts[category]} ${counts[category] === 1 ? PII_LABELS[category] : plural[category]}`).join(", ");
+}
+function normalise(category, value) {
+  switch (category) {
+    case "email":
+      return value.toLowerCase();
+    case "iban":
+    case "card":
+    case "taxId":
+    case "socialSecurity":
+    case "phone":
+      return value.replace(/[\s./()-]/g, "");
+    case "person":
+    case "address":
+      return value.replace(/\s+/g, " ").trim();
+    default:
+      return value;
+  }
+}
+var PII_LABELS, PLACEHOLDER, PII_CATEGORIES, DEFAULT_PII_OPTIONS, DEFAULT_PII_CLEAN, EMAIL, PHONE, IBAN, CARD, TAX_ID, SOCIAL, IPV4, IPV6, BIRTH_DATE, STREET_WORD, TOWN, ADDRESS, TITLES, NAME_WORD, NOT_TITLE, SALUTED_NAME, SIGNATURE_NAME, escapeRegex, Pseudonymizer, countByCategory, totalCount, GDPR_RESPONSIBILITIES;
+var init_pii = __esm({
+  "lib/pii.ts"() {
+    "use strict";
+    PII_LABELS = {
+      email: "E-Mail-Adresse",
+      phone: "Telefonnummer",
+      iban: "IBAN",
+      card: "Kartennummer",
+      taxId: "Steuer-Identifikationsnummer",
+      socialSecurity: "Sozialversicherungsnummer",
+      ip: "IP-Adresse",
+      birthDate: "Geburtsdatum",
+      address: "Postanschrift",
+      person: "Personenname"
+    };
+    PLACEHOLDER = {
+      email: "E-Mail",
+      phone: "Telefon",
+      iban: "IBAN",
+      card: "Karte",
+      taxId: "Steuer-ID",
+      socialSecurity: "SV-Nummer",
+      ip: "IP",
+      birthDate: "Geburtsdatum",
+      address: "Anschrift",
+      person: "Person"
+    };
+    PII_CATEGORIES = ["email", "phone", "iban", "card", "taxId", "socialSecurity", "ip", "birthDate", "address", "person"];
+    DEFAULT_PII_OPTIONS = {
+      categories: {
+        email: true,
+        phone: true,
+        iban: true,
+        card: true,
+        taxId: true,
+        socialSecurity: true,
+        ip: true,
+        birthDate: true,
+        address: true,
+        person: true
+      },
+      knownNames: [],
+      mode: "pseudonymisieren"
+    };
+    DEFAULT_PII_CLEAN = {
+      enabled: false,
+      remove: false,
+      email: true,
+      phone: true,
+      iban: true,
+      card: true,
+      taxId: true,
+      socialSecurity: true,
+      ip: true,
+      birthDate: true,
+      address: true,
+      person: true,
+      knownNames: []
+    };
+    EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+    PHONE = /(?:(?<![\w+])\+\d{1,3}[\s./-]?|(?<!\d)0)\(?\d{1,5}\)?(?:[\s./-]?\d{2,5}){2,5}(?!\d)/g;
+    IBAN = /\b[A-Z]{2}\d{2}(?:[\s]?[A-Z0-9]{4}){2,7}(?:[\s]?[A-Z0-9]{1,4})?\b/g;
+    CARD = /\b(?:\d[ -]?){13,19}\b/g;
+    TAX_ID = /\b\d{2}[\s/]?\d{3}[\s/]?\d{3}[\s/]?\d{3}\b|\b\d{11}\b/g;
+    SOCIAL = /\b\d{8}[A-Za-z]\d{3}\b|\b\d{2}\s?\d{6}\s?[A-Za-z]\s?\d{3}\b/g;
+    IPV4 = /\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g;
+    IPV6 = /\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}\b/g;
+    BIRTH_DATE = /(?:(?:geb(?:oren|\.)?|Geburtsdatum|Geburtstag|date of birth|DOB|born)\s*(?:am|on|:)?\s*)(\d{1,2}[./-]\s?\d{1,2}[./-]\s?\d{2,4}|\d{4}-\d{2}-\d{2})|(\d{1,2}[./-]\s?\d{1,2}[./-]\s?\d{2,4})\s*(?:\(geb(?:oren|\.)?\)|geb\.)/gi;
+    STREET_WORD = "(?:[Ss]tra(?:\xDF|ss)e|[Ss]tr\\.|[Ww]eg|[Gg]asse|[Pp]latz|[Aa]llee|[Rr]ing|[Dd]amm|[Uu]fer|[Cc]haussee|[Ss]teig|[Mm]arkt)";
+    TOWN = "(?:(?:Bad|Sankt|St\\.|Neu|Gro\xDF|Klein|Ober|Unter|Alt)[ -])?[A-Z\xC4\xD6\xDC][a-z\xE4\xF6\xFC\xDF-]+(?: (?:am|an der|im|in der|bei|ob der|vor der|a\\. ?d\\.|i\\. ?d\\.) [A-Z\xC4\xD6\xDC][a-z\xE4\xF6\xFC\xDF-]+)?";
+    ADDRESS = new RegExp(
+      `(?<![\\w\xE4\xF6\xFC\xDF])(?:[A-Z\xC4\xD6\xDC][\\w\xE4\xF6\xFC\xDF.-]*[ -]){0,2}[A-Z\xC4\xD6\xDCa-z\xE4\xF6\xFC\xDF][\\w\xE4\xF6\xFC\xDF-]*?${STREET_WORD}\\s+\\d{1,4}\\s?[a-zA-Z]?(?:\\s*[,/\\n]\\s*|\\s+)\\d{4,5}\\s+${TOWN}`,
+      "g"
+    );
+    TITLES = "(?:Herrn?|Frau|Hr\\.|Fr\\.|Mr\\.?|Mrs\\.?|Ms\\.?|Dr\\.|Prof\\.|Dipl\\.-[A-Za-z]+\\.?|Mag\\.|Ing\\.|Dr\\. med\\.|RA|StB|WP)";
+    NAME_WORD = "[A-Z\xC4\xD6\xDC][a-z\xE4\xF6\xFC\xDFA-Z\xC4\xD6\xDC'\u2019-]+";
+    NOT_TITLE = `(?!${TITLES}(?![\\w\xE4\xF6\xFC\xDF]))`;
+    SALUTED_NAME = new RegExp(`\\b${TITLES}(?:\\s+${TITLES})*\\s+(${NOT_TITLE}${NAME_WORD}(?:\\s+${NOT_TITLE}${NAME_WORD}){0,2})`, "g");
+    SIGNATURE_NAME = new RegExp(
+      `(?:Mit freundlichen Gr\xFC\xDFen|Freundliche Gr\xFC\xDFe|Viele Gr\xFC\xDFe|Beste Gr\xFC\xDFe|Herzliche Gr\xFC\xDFe|Hochachtungsvoll|Kind regards|Best regards|Sincerely|Regards)[,.]?\\s*\\n+\\s*(?:i\\.\\s?A\\.\\s*|i\\.\\s?V\\.\\s*|ppa\\.\\s*)?(${NAME_WORD}(?:\\s+${NAME_WORD}){1,2})`,
+      "g"
+    );
+    escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    Pseudonymizer = class {
+      constructor(options) {
+        this.options = options;
+        this.tokens = /* @__PURE__ */ new Map();
+        this.counters = /* @__PURE__ */ new Map();
+      }
+      replacementFor(match) {
+        if (this.options.mode === "entfernen") return "";
+        const key = `${match.category}:${normalise(match.category, match.value)}`;
+        let entry2 = this.tokens.get(key);
+        if (!entry2) {
+          const n = (this.counters.get(match.category) ?? 0) + 1;
+          this.counters.set(match.category, n);
+          entry2 = { token: `[${PLACEHOLDER[match.category]} ${n}]`, category: match.category, original: match.value.replace(/\s+/g, " ") };
+          this.tokens.set(key, entry2);
+        }
+        return entry2.token;
+      }
+      /** Placeholder → original (as first seen), for the confidential mapping list. */
+      mapping() {
+        return Array.from(this.tokens.values()).map((entry2) => ({ ...entry2 }));
+      }
+      /** Replaces every match in a plain string. */
+      apply(text) {
+        const matches = findPii(text, this.options);
+        if (matches.length === 0) return { text, count: 0 };
+        let out = "";
+        let cursor = 0;
+        for (const match of matches) {
+          out += text.slice(cursor, match.start) + this.replacementFor(match);
+          cursor = match.end;
+        }
+        return { text: out + text.slice(cursor), count: matches.length };
+      }
+    };
+    countByCategory = (matches) => {
+      const counts = {};
+      for (const match of matches) counts[match.category] = (counts[match.category] ?? 0) + 1;
+      return counts;
+    };
+    totalCount = (counts) => PII_CATEGORIES.reduce((sum, category) => sum + (counts[category] ?? 0), 0);
+    GDPR_RESPONSIBILITIES = [
+      "Rechtsgrundlage (Art. 6 DSGVO): F\xFCr die verbleibende Verarbeitung \u2014 auch die Weitergabe des bereinigten Dokuments \u2014 muss eine Rechtsgrundlage vorliegen.",
+      "Zweckbindung und Datenminimierung (Art. 5 Abs. 1 lit. b und c): Pr\xFCfen, ob die verbliebenen Inhalte f\xFCr den Zweck der Weitergabe erforderlich sind.",
+      "Vollst\xE4ndigkeit der Erkennung: Die Mustererkennung findet typische Formate. Namen ohne Anrede, Namen in Bildern, eingebetteten Objekten, Diagrammdaten und Spitznamen m\xFCssen von Hand gepr\xFCft werden.",
+      "Pseudonymisierung ist keine Anonymisierung (Art. 4 Nr. 5): Die Zuordnungsliste ist selbst ein personenbezogenes Datum und getrennt vom Dokument, zugriffsgesch\xFCtzt und mit L\xF6schfrist aufzubewahren \u2014 oder zu vernichten, wenn keine R\xFCckf\xFChrung n\xF6tig ist.",
+      "Speicherdauer (Art. 5 Abs. 1 lit. e, Art. 17): Das Original mit den Klardaten unterliegt weiterhin der L\xF6schfrist; die Bereinigung einer Kopie \xE4ndert daran nichts.",
+      "Betroffenenrechte (Art. 15\u201321): Auskunfts-, Berichtigungs- und L\xF6schersuchen beziehen sich auch auf das Original und die Zuordnungsliste.",
+      "Auftragsverarbeitung (Art. 28): Wird das Dokument an einen Dienstleister gegeben, braucht es einen Vertrag zur Auftragsverarbeitung; die Bereinigung ersetzt ihn nicht.",
+      "Verzeichnis und Nachweis (Art. 5 Abs. 2, Art. 30): Dieses Protokoll dokumentiert die technische Ma\xDFnahme; die Aufnahme in das Verarbeitungsverzeichnis und die Bewertung bleiben Aufgabe des Verantwortlichen."
+    ];
+  }
+});
+
+// lib/piiDocument.ts
+function writeGroup(group, text, matches, pseudonymizer) {
+  const emitted = matches.map(() => false);
+  let offset = 0;
+  let first = 0;
+  for (const segment of group) {
+    const start = offset;
+    const end = offset + segment.text.length;
+    offset = end;
+    while (first < matches.length && matches[first].end <= start) first++;
+    if (!segment.write) continue;
+    let out = "";
+    let cursor = start;
+    for (let i = first; i < matches.length && matches[i].start < end; i++) {
+      const match = matches[i];
+      if (!emitted[i]) {
+        out += text.slice(cursor, Math.max(match.start, start)) + pseudonymizer.replacementFor(match);
+        emitted[i] = true;
+      }
+      cursor = Math.min(end, match.end);
+    }
+    out += text.slice(cursor, end);
+    if (out !== segment.text) segment.write(out);
+  }
+}
+function scanGroups(groups, options) {
+  const found = [];
+  for (const group of groups) {
+    if (!hasRealText(group)) continue;
+    found.push(...findPii(joinGroup(group), options));
+  }
+  return found;
+}
+function replaceGroups(groups, options, pseudonymizer) {
+  const replaced = [];
+  for (const group of groups) {
+    if (!hasRealText(group)) continue;
+    const text = joinGroup(group);
+    const matches = findPii(text, options);
+    if (matches.length === 0) continue;
+    writeGroup(group, text, matches, pseudonymizer);
+    replaced.push(...matches);
+  }
+  return replaced;
+}
+function isCandidatePart(name, xml) {
+  if (!name.endsWith(".xml") || name.startsWith("docProps/") || name.endsWith(".rels") || name === "[Content_Types].xml") return false;
+  if (/\/(styles|fontTable|numbering|settings|webSettings|calcChain|theme\d*|presProps|viewProps|tableStyles)\.xml$/.test(name)) return false;
+  if (/\/theme\//.test(name)) return false;
+  return OOXML_TEXT_MARKERS.some((marker) => xml.includes(marker));
+}
+function nearestAncestor(element, ns, names) {
+  let node = element.parentNode;
+  while (node && node.nodeType === 1) {
+    const el = node;
+    if (el.namespaceURI === ns && names.includes(el.localName)) return el;
+    node = node.parentNode;
+  }
+  return null;
+}
+function elementSegment(element, preserveSpace) {
+  return {
+    text: element.textContent ?? "",
+    write: (text) => {
+      element.textContent = text;
+      if (preserveSpace && /^\s|\s$/.test(text)) element.setAttributeNS(XML_NS, "xml:space", "preserve");
+    }
+  };
+}
+function attributeSegment(element, name) {
+  return { text: element.getAttribute(name) ?? "", write: (text) => element.setAttribute(name, text) };
+}
+function groupBy(elements, anchorOf, preserveSpace) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const element of elements) {
+    const anchor = anchorOf(element);
+    let group = groups.get(anchor);
+    if (!group) groups.set(anchor, group = []);
+    group.push(elementSegment(element, preserveSpace));
+  }
+  return Array.from(groups.values());
+}
+function ooxmlGroups(doc) {
+  const groups = [];
+  const wordText = [...byNS(doc, NS.w, "t"), ...byNS(doc, NS.w, "delText")];
+  if (wordText.length > 0) {
+    wordText.sort(documentOrder);
+    groups.push(...groupBy(wordText, (el) => nearestAncestor(el, NS.w, ["p"]) ?? el, true));
+  }
+  for (const field of byNS(doc, NS.w, "instrText")) groups.push([elementSegment(field, true)]);
+  const drawingText = byNS(doc, NS_A2, "t");
+  if (drawingText.length > 0) groups.push(...groupBy(drawingText, (el) => nearestAncestor(el, NS_A2, ["p"]) ?? el, false));
+  const sheetText = byNS(doc, NS.sheet, "t").filter((el) => !nearestAncestor(el, NS.sheet, ["rPh"]));
+  if (sheetText.length > 0) groups.push(...groupBy(sheetText, (el) => nearestAncestor(el, NS.sheet, ["si", "is", "text"]) ?? el, true));
+  for (const comment of byNS(doc, NS.p, "text")) groups.push([elementSegment(comment, false)]);
+  for (const element of [...byNS(doc, "*", "docPr"), ...byNS(doc, "*", "cNvPr")]) {
+    for (const name of ["descr", "title"]) {
+      if (element.hasAttribute(name)) groups.push([attributeSegment(element, name)]);
+    }
+  }
+  return groups;
+}
+function documentOrder(a, b) {
+  if (a === b) return 0;
+  if (typeof a.compareDocumentPosition === "function") {
+    const position = a.compareDocumentPosition(b);
+    if (position & 4) return -1;
+    if (position & 2) return 1;
+    return 0;
+  }
+  return 0;
+}
+function scanOoxmlPii(entries, options) {
+  const found = [];
+  for (const entry2 of entries) {
+    const xml = decodeText(entry2.data);
+    if (!isCandidatePart(entry2.name, xml)) continue;
+    try {
+      found.push(...scanGroups(ooxmlGroups(parseXml(xml, entry2.name)), options));
+    } catch {
+    }
+  }
+  return found;
+}
+function applyOoxmlPii(entries, options, pseudonymizer) {
+  const result = { replaced: {}, parts: [] };
+  for (const entry2 of entries) {
+    const xml = decodeText(entry2.data);
+    if (!isCandidatePart(entry2.name, xml)) continue;
+    const doc = parseXml(xml, entry2.name);
+    const replaced = replaceGroups(ooxmlGroups(doc), options, pseudonymizer);
+    if (replaced.length === 0) continue;
+    setText(entries, entry2.name, serializeXml(doc));
+    addCounts(result.replaced, countByCategory(replaced));
+    result.parts.push(entry2.name);
+  }
+  for (const entry2 of entries) {
+    if (!entry2.name.endsWith(".rels")) continue;
+    const xml = decodeText(entry2.data);
+    if (!xml.includes("mailto:")) continue;
+    const next = xml.replace(/Target="mailto:([^"?]+)([^"]*)"/g, (whole, address, rest) => {
+      const decoded2 = address.replace(/&amp;/g, "&");
+      const matches = findPii(decoded2, options);
+      if (matches.length === 0) return whole;
+      addCounts(result.replaced, countByCategory(matches));
+      const token = pseudonymizer.replacementFor(matches[0]);
+      const slug = token.replace(/[^\w]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+      return slug ? `Target="mailto:${slug}@beispiel.invalid${rest}"` : `Target="mailto:${rest}"`;
+    });
+    if (next !== xml) {
+      setText(entries, entry2.name, next);
+      result.parts.push(entry2.name);
+    }
+  }
+  return result;
+}
+function odfGroups(doc) {
+  const groups = [];
+  const paragraphs = [...byNS(doc, ODF_NS.text, "p"), ...byNS(doc, ODF_NS.text, "h")];
+  for (const paragraph of paragraphs) {
+    const group = [];
+    const walk = (node) => {
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        if (child.nodeType === 3) {
+          const textNode = child;
+          group.push({ text: textNode.data, write: (text) => textNode.data = text });
+          continue;
+        }
+        if (child.nodeType !== 1) continue;
+        const el = child;
+        if (el.namespaceURI === ODF_NS.text) {
+          if (el.localName === "p" || el.localName === "h") continue;
+          if (el.localName === "s") {
+            group.push({ text: " ".repeat(Math.max(1, Number(el.getAttributeNS(ODF_NS.text, "c") || 1))) });
+            continue;
+          }
+          if (el.localName === "tab") {
+            group.push({ text: "	" });
+            continue;
+          }
+          if (el.localName === "line-break") {
+            group.push({ text: "\n" });
+            continue;
+          }
+          if (el.localName === "note" || el.localName === "tracked-changes") continue;
+        }
+        if (el.namespaceURI === ODF_NS.office || el.namespaceURI === ODF_NS.dc || el.namespaceURI === ODF_NS.meta) continue;
+        walk(el);
+      }
+    };
+    walk(paragraph);
+    if (group.length > 0) groups.push(group);
+  }
+  return groups;
+}
+function scanOdfPii(entries, options) {
+  const found = [];
+  for (const entry2 of entries) {
+    if (!ODF_TEXT_PARTS.includes(entry2.name)) continue;
+    try {
+      found.push(...scanGroups(odfGroups(parseXml(decodeText(entry2.data), entry2.name)), options));
+    } catch {
+    }
+  }
+  return found;
+}
+function applyOdfPii(entries, options, pseudonymizer) {
+  const result = { replaced: {}, parts: [] };
+  for (const entry2 of entries) {
+    if (!ODF_TEXT_PARTS.includes(entry2.name)) continue;
+    const doc = parseXml(decodeText(entry2.data), entry2.name);
+    const replaced = replaceGroups(odfGroups(doc), options, pseudonymizer);
+    if (replaced.length === 0) continue;
+    setText(entries, entry2.name, serializeXml(doc));
+    addCounts(result.replaced, countByCategory(replaced));
+    result.parts.push(entry2.name);
+  }
+  return result;
+}
+function rtfChars(source) {
+  const chars = [];
+  const stack = [{ skip: false, uc: 1 }];
+  const top = () => stack[stack.length - 1];
+  let i = 0;
+  const n = source.length;
+  const skipFallback = (count) => {
+    for (let k = 0; k < count && i < n; k++) {
+      if (source[i] === "\\" && source[i + 1] === "'") i += 4;
+      else if (source[i] === "{" || source[i] === "}" || source[i] === "\\") return;
+      else i++;
+    }
+  };
+  while (i < n) {
+    const c = source[i];
+    if (c === "{") {
+      const inherited = top();
+      stack.push({ skip: inherited.skip, uc: inherited.uc });
+      i++;
+      const star = source.startsWith("\\*\\", i);
+      const match = /^\\(?:\*\\)?([a-zA-Z]+)/.exec(source.slice(i, i + 40));
+      if (match) {
+        const word = match[1];
+        if (star) {
+          if (!RTF_STAR_KEEP.has(word)) top().skip = true;
+        } else if (RTF_SKIP.has(word)) {
+          top().skip = true;
+        }
+      }
+      continue;
+    }
+    if (c === "}") {
+      if (stack.length > 1) stack.pop();
+      i++;
+      continue;
+    }
+    if (c === "\\") {
+      const next = source[i + 1];
+      if (next === void 0) break;
+      if (next === "'") {
+        const code = parseInt(source.substr(i + 2, 2), 16);
+        if (!top().skip && !Number.isNaN(code)) chars.push({ ch: String.fromCharCode(code), start: i, end: i + 4 });
+        i += 4;
+        continue;
+      }
+      if (next === "\\" || next === "{" || next === "}") {
+        if (!top().skip) chars.push({ ch: next, start: i, end: i + 2 });
+        i += 2;
+        continue;
+      }
+      if (next === "~") {
+        if (!top().skip) chars.push({ ch: " ", start: -1, end: -1 });
+        i += 2;
+        continue;
+      }
+      if (next === "-" || next === "_" || next === ":" || next === "|" || next === "*") {
+        i += 2;
+        continue;
+      }
+      if (next === "\n" || next === "\r") {
+        if (!top().skip) chars.push({ ch: "\n", start: -1, end: -1 });
+        i += 2;
+        continue;
+      }
+      const control = /^\\([a-zA-Z]+)(-?\d+)?( ?)/.exec(source.slice(i, i + 40));
+      if (!control) {
+        i += 2;
+        continue;
+      }
+      const [whole, word, param] = control;
+      i += whole.length;
+      if (word === "bin") {
+        i += Math.max(0, Number(param) || 0);
+        continue;
+      }
+      if (word === "uc") {
+        top().uc = Math.max(0, Number(param) || 0);
+        continue;
+      }
+      if (word === "u" && param !== void 0) {
+        let code = Number(param);
+        if (code < 0) code += 65536;
+        const start = i - whole.length;
+        skipFallback(top().uc);
+        if (!top().skip) chars.push({ ch: String.fromCharCode(code), start, end: i });
+        continue;
+      }
+      if (!top().skip && RTF_SPECIALS[word] !== void 0) chars.push({ ch: RTF_SPECIALS[word], start: -1, end: -1 });
+      continue;
+    }
+    if (c === "\r" || c === "\n") {
+      i++;
+      continue;
+    }
+    if (!top().skip) chars.push({ ch: c, start: i, end: i + 1 });
+    i++;
+  }
+  return chars;
+}
+function scanRtfPii(source, options) {
+  return findPii(rtfPlainText(source), options);
+}
+function escapeRtf2(value) {
+  return value.replace(/[\\{}]/g, (char) => `\\${char}`).replace(/[^\x20-\x7e]/g, (char) => `\\u${char.charCodeAt(0)}?`);
+}
+function applyRtfPii(source, options, pseudonymizer) {
+  const chars = rtfChars(source);
+  const plain = chars.map((c) => c.ch).join("");
+  const matches = findPii(plain, options);
+  if (matches.length === 0) return { text: source, replaced: {} };
+  const edits = [];
+  for (const match of matches) {
+    const replacement = escapeRtf2(pseudonymizer.replacementFor(match));
+    let inserted = false;
+    for (let k = match.start; k < match.end; k++) {
+      const char = chars[k];
+      if (char.start < 0) continue;
+      edits.push({ pos: char.start, del: char.end - char.start, insert: inserted ? "" : replacement });
+      inserted = true;
+    }
+  }
+  edits.sort((a, b) => b.pos - a.pos);
+  let out = source;
+  for (const edit of edits) out = out.slice(0, edit.pos) + edit.insert + out.slice(edit.pos + edit.del);
+  return { text: out, replaced: countByCategory(matches) };
+}
+var joinGroup, hasRealText, XML_NS, NS_A2, OOXML_TEXT_MARKERS, byNS, ODF_TEXT_PARTS, RTF_SKIP, RTF_STAR_KEEP, RTF_SPECIALS, rtfPlainText;
+var init_piiDocument = __esm({
+  "lib/piiDocument.ts"() {
+    "use strict";
+    init_ooxmlPackage();
+    init_odf();
+    init_pii();
+    joinGroup = (group) => group.map((s) => s.text).join("");
+    hasRealText = (group) => group.some((s) => s.write && s.text.trim() !== "");
+    XML_NS = "http://www.w3.org/XML/1998/namespace";
+    NS_A2 = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    OOXML_TEXT_MARKERS = ["<w:t>", "<w:t ", "<w:delText", "<w:instrText", "<a:t>", "<a:t ", "<t>", "<t ", "<p:text", ' descr="', ' title="'];
+    byNS = (doc, ns, tag) => Array.from(doc.getElementsByTagNameNS(ns, tag));
+    ODF_TEXT_PARTS = ["content.xml", "styles.xml"];
+    RTF_SKIP = /* @__PURE__ */ new Set([
+      "fonttbl",
+      "colortbl",
+      "stylesheet",
+      "info",
+      "pict",
+      "object",
+      "objdata",
+      "listtable",
+      "listoverridetable",
+      "revtbl",
+      "rsidtbl",
+      "themedata",
+      "colorschememapping",
+      "datastore",
+      "latentstyles",
+      "xmlnstbl",
+      "mmathPr",
+      "generator",
+      "xe",
+      "tc",
+      "sp",
+      "shpinst",
+      "nonshppict",
+      "bkmkstart",
+      "bkmkend",
+      "template",
+      "operator",
+      "filetbl",
+      "listpicture",
+      "protusertbl",
+      "pgdsctbl",
+      "ud",
+      "atnauthor",
+      "atnid",
+      "atndate",
+      "atnref",
+      "atnparent",
+      "factoidname",
+      "wgrffmtfilter",
+      "docvar",
+      "ftnsep",
+      "ftnsepc",
+      "aftnsep",
+      "aftnsepc",
+      "pntext",
+      "pntxta",
+      "pntxtb"
+    ]);
+    RTF_STAR_KEEP = /* @__PURE__ */ new Set(["annotation", "fldinst", "shptxt"]);
+    RTF_SPECIALS = {
+      par: "\n",
+      line: "\n",
+      sect: "\n",
+      page: "\n",
+      row: "\n",
+      cell: "	",
+      nestcell: "	",
+      nestrow: "\n",
+      tab: "	",
+      emdash: "\u2014",
+      endash: "\u2013",
+      lquote: "\u2018",
+      rquote: "\u2019",
+      ldblquote: "\u201C",
+      rdblquote: "\u201D",
+      bullet: "\u2022",
+      emspace: " ",
+      enspace: " ",
+      qmspace: " "
+    };
+    rtfPlainText = (source) => rtfChars(source).map((c) => c.ch).join("");
   }
 });
 
@@ -3489,8 +4315,10 @@ var clean_exports = {};
 __export(clean_exports, {
   DEFAULT_OPTIONS: () => DEFAULT_OPTIONS,
   SUPPORTED_EXTENSIONS: () => SUPPORTED_EXTENSIONS2,
+  buildMappingText: () => buildMappingText,
   buildReportText: () => buildReportText,
   cleanFile: () => cleanFile,
+  hasMapping: () => hasMapping,
   loadFile: () => loadFile,
   sha256: () => sha256,
   toW3CDTF: () => toW3CDTF
@@ -3515,7 +4343,30 @@ function detectKind(name, bytes2) {
   if (isRtf(new TextDecoder("latin1").decode(bytes2.subarray(0, 64)))) return "rtf";
   return "unbekannt";
 }
-async function loadFile(name, bytes2) {
+function knownNamesOf(file) {
+  const names = NAME_KEYS.map((key) => file.values[key] ?? "").filter((value) => value !== "");
+  if (file.kind === "ooxml" && file.entries) names.push(...collectAuthors(file.entries));
+  if (file.kind === "odf" && file.entries) names.push(...collectOdfAuthors(file.entries));
+  if (file.kind === "rtf" && file.text !== void 0) names.push(...collectRevisionAuthors(file.text));
+  return names;
+}
+function piiFinding(matches, manual) {
+  if (matches.length === 0) return null;
+  const counts = countByCategory(matches);
+  const examples = [];
+  for (const category of Object.keys(counts)) {
+    const values = Array.from(new Set(matches.filter((m) => m.category === category).map((m) => m.value.replace(/\s+/g, " ")))).slice(0, 3);
+    examples.push(`${PII_LABELS[category]}: ${values.join(", ")}${(counts[category] ?? 0) > 3 ? ", \u2026" : ""}`);
+  }
+  return {
+    id: "pii",
+    label: `Personenbezogene Daten im Inhalt: ${describeCounts(counts)}`,
+    detail: manual ? `${examples.join(" \xB7 ")} \u2014 Der Text eines PDF wird hier nicht ver\xE4ndert; die Stellen m\xFCssen im Quelldokument bereinigt werden.` : `${examples.join(" \xB7 ")} \u2014 Mit der DSGVO-Bereinigung werden sie durch nummerierte Platzhalter ersetzt.`,
+    severity: "hoch",
+    option: manual ? void 0 : "enabled"
+  };
+}
+async function loadFile(name, bytes2, piiScan = DEFAULT_PII_CLEAN) {
   const base = {
     name,
     size: bytes2.length,
@@ -3637,15 +4488,83 @@ async function loadFile(name, bytes2) {
   } catch (err) {
     base.error = err instanceof Error ? err.message : "Die Datei konnte nicht gelesen werden.";
   }
+  if (!base.error) {
+    try {
+      const options = piiOptionsFrom(piiScan, knownNamesOf(base));
+      let matches = [];
+      let manual = false;
+      if (base.kind === "ooxml" && base.entries) matches = scanOoxmlPii(base.entries, options);
+      else if (base.kind === "odf" && base.entries) matches = scanOdfPii(base.entries, options);
+      else if (base.kind === "rtf" && base.text !== void 0) matches = scanRtfPii(base.text, options);
+      else if (base.kind === "pdf") {
+        manual = true;
+        const extracted = await extractPdfText(bytes2);
+        matches = findPii(extracted.text, options);
+        if (extracted.partial) {
+          base.findings.push({
+            id: "piiUnreadable",
+            label: "Teile des PDF-Textes nicht pr\xFCfbar",
+            detail: "Schriften mit CID-Kodierung liefern keine lesbaren Zeichen. Diese Passagen m\xFCssen im Quelldokument gepr\xFCft werden.",
+            severity: "mittel"
+          });
+        }
+      }
+      const finding = piiFinding(matches, manual);
+      if (finding) base.findings.push(finding);
+    } catch {
+    }
+  }
   return base;
+}
+function piiContext(file, options) {
+  if (!options.pii.enabled) return null;
+  const piiOptions = piiOptionsFrom(options.pii, knownNamesOf(file));
+  return { options: piiOptions, pseudonymizer: new Pseudonymizer(piiOptions), summary: { replaced: {}, mapping: [], notes: [] } };
+}
+function pseudonymizeValues(file, values, customProps, context) {
+  const replaced = {};
+  const next = { ...values };
+  const textKeys = new Set(file.fields.filter((f) => f.kind === "text" || f.kind === "longtext").map((f) => f.key));
+  for (const key of Object.keys(next)) {
+    if (!textKeys.has(key) || !next[key]) continue;
+    const matches = findPii(next[key], context.options);
+    if (matches.length === 0) continue;
+    next[key] = context.pseudonymizer.apply(next[key]).text;
+    addCounts(replaced, countByCategory(matches));
+  }
+  const props = customProps.map((prop) => {
+    if (typeof prop.value !== "string" || !prop.value) return prop;
+    const matches = findPii(prop.value, context.options);
+    if (matches.length === 0) return prop;
+    addCounts(replaced, countByCategory(matches));
+    return { ...prop, value: context.pseudonymizer.apply(prop.value).text };
+  });
+  return { values: next, customProps: props, replaced };
 }
 async function cleanFile(file, values, customProps, options) {
   const steps = [];
   let fileName = file.name;
   let bytes2 = file.bytes;
+  const pii = piiContext(file, options);
+  if (pii) {
+    const properties = pseudonymizeValues(file, values, customProps, pii);
+    values = properties.values;
+    customProps = properties.customProps;
+    if (totalCount(properties.replaced) > 0) {
+      steps.push(piiStep("in den Eigenschaften", properties.replaced, options.pii.remove));
+      addCounts(pii.summary.replaced, properties.replaced);
+    }
+  }
   try {
     if (file.kind === "ooxml" && file.entries) {
       const entries = file.entries.map((e) => ({ ...e }));
+      if (pii) {
+        const content = applyOoxmlPii(entries, pii.options, pii.pseudonymizer);
+        if (content.parts.length > 0) {
+          steps.push(`${piiStep("im Inhalt", content.replaced, options.pii.remove)} (${content.parts.length} Teil(e))`);
+          addCounts(pii.summary.replaced, content.replaced);
+        }
+      }
       applyFields(entries, values, "core");
       applyFields(entries, values, "app");
       steps.push("Dokumenteigenschaften geschrieben");
@@ -3680,6 +4599,13 @@ async function cleanFile(file, values, customProps, options) {
       bytes2 = new Uint8Array(await (await writeZip(entries, timestamp)).arrayBuffer());
     } else if (file.kind === "odf" && file.entries) {
       const entries = file.entries.map((e) => ({ ...e }));
+      if (pii) {
+        const content = applyOdfPii(entries, pii.options, pii.pseudonymizer);
+        if (content.parts.length > 0) {
+          steps.push(piiStep("im Inhalt", content.replaced, options.pii.remove));
+          addCounts(pii.summary.replaced, content.replaced);
+        }
+      }
       writeOdfFields(entries, values);
       steps.push("Dokumenteigenschaften geschrieben");
       steps.push(...cleanOdf(entries, options.odf));
@@ -3691,13 +4617,25 @@ async function cleanFile(file, values, customProps, options) {
       if (result.error) return failure(file, result.error);
       bytes2 = result.bytes;
       steps.push(...result.steps);
+      if (pii && file.findings.some((f) => f.id === "pii")) {
+        pii.summary.notes.push("Der Seitentext des PDF wurde nicht ver\xE4ndert \u2014 personenbezogene Daten darin m\xFCssen im Quelldokument bereinigt werden.");
+      }
     } else if (file.kind === "ole2") {
       const result = writeOle2(file.bytes, values);
       if (result.error) return failure(file, result.error);
       bytes2 = result.bytes;
       steps.push(...result.steps);
     } else if (file.kind === "rtf" && file.text !== void 0) {
-      let text = writeRtfFields(file.text, values);
+      let text = file.text;
+      if (pii) {
+        const content = applyRtfPii(text, pii.options, pii.pseudonymizer);
+        if (totalCount(content.replaced) > 0) {
+          text = content.text;
+          steps.push(piiStep("im Inhalt", content.replaced, options.pii.remove));
+          addCounts(pii.summary.replaced, content.replaced);
+        }
+      }
+      text = writeRtfFields(text, values);
       const result = cleanRtf(text, options.rtf);
       text = result.text;
       steps.push("Dokumenteigenschaften geschrieben", ...result.steps);
@@ -3727,14 +4665,24 @@ async function cleanFile(file, values, customProps, options) {
   } catch (err) {
     return failure(file, err instanceof Error ? err.message : "Die Datei konnte nicht geschrieben werden.");
   }
-  const verified = await loadFile(fileName, bytes2);
+  const verified = await loadFile(fileName, bytes2, options.pii);
+  if (pii) {
+    pii.summary.mapping = pii.pseudonymizer.mapping();
+    if (file.kind === "ole2" || file.kind === "image" || file.kind === "media") {
+      pii.summary.notes.push("F\xFCr dieses Format gibt es keine Inhaltspr\xFCfung; nur die Eigenschaften wurden behandelt.");
+    }
+    if (file.findings.some((f) => f.id === "trackedChanges")) {
+      pii.summary.notes.push("Nachverfolgte \xC4nderungen enthalten Namen und Zeitpunkte und m\xFCssen im Programm angenommen werden.");
+    }
+  }
   return {
     bytes: bytes2,
     fileName,
     steps,
     sha256Before: file.sha256,
     sha256After: await sha256(bytes2),
-    remaining: verified.findings
+    remaining: verified.findings,
+    pii: pii?.summary
   };
 }
 function failure(file, error) {
@@ -3755,9 +4703,15 @@ function parseDate(value) {
 }
 function buildReportText(entries, generatedAt) {
   const lines = [];
-  lines.push("Metadaten-Bereinigung \u2014 Protokoll");
+  const gdpr = entries.some((entry2) => entry2.pii);
+  lines.push(gdpr ? "Metadaten- und DSGVO-Bereinigung \u2014 Protokoll" : "Metadaten-Bereinigung \u2014 Protokoll");
   lines.push(`Erstellt: ${generatedAt}`);
   lines.push(`Dateien: ${entries.length}`);
+  if (gdpr) {
+    lines.push("");
+    lines.push("Dieses Protokoll belegt eine technische Ma\xDFnahme (Art. 32 DSGVO). Es bescheinigt keine");
+    lines.push("DSGVO-Konformit\xE4t \u2014 die ergibt sich aus der Verarbeitung insgesamt, siehe den Abschnitt am Ende.");
+  }
   lines.push("");
   for (const entry2 of entries) {
     lines.push("=".repeat(72));
@@ -3778,6 +4732,13 @@ function buildReportText(entries, generatedAt) {
     lines.push(`Durchgef\xFChrt (${entry2.steps.length}):`);
     for (const step of entry2.steps) lines.push(`  - ${step}`);
     lines.push("");
+    if (entry2.pii) {
+      const total = totalCount(entry2.pii.replaced);
+      lines.push(`DSGVO-Bereinigung: ${total === 0 ? "keine personenbezogenen Daten in Eigenschaften und Inhalt gefunden." : `${total} Stelle(n) ersetzt \u2014 ${describeCounts(entry2.pii.replaced)}.`}`);
+      if (entry2.pii.mapping.length > 0) lines.push(`  ${entry2.pii.mapping.length} Platzhalter vergeben; die Zuordnungsliste liegt getrennt vor.`);
+      for (const note of entry2.pii.notes) lines.push(`  Hinweis: ${note}`);
+      lines.push("");
+    }
     if (entry2.remaining.length === 0) {
       lines.push("Nachkontrolle: keine Funde mehr.");
     } else {
@@ -3786,9 +4747,32 @@ function buildReportText(entries, generatedAt) {
     }
     lines.push("");
   }
+  if (gdpr) {
+    lines.push("=".repeat(72));
+    lines.push("In Ihrer Verantwortung bleibt");
+    lines.push("");
+    for (const item of GDPR_RESPONSIBILITIES) lines.push(`  - ${item}`);
+    lines.push("");
+  }
   return lines.join("\n");
 }
-var DEFAULT_OPTIONS, OOXML_EXT, ODF_EXT, OLE2_EXT, IMAGE_EXT, MEDIA_EXT, SUPPORTED_EXTENSIONS2, officeFields;
+function buildMappingText(entries, generatedAt) {
+  const lines = [];
+  lines.push("Zuordnungsliste der Pseudonyme \u2014 VERTRAULICH");
+  lines.push(`Erstellt: ${generatedAt}`);
+  lines.push("Getrennt vom Protokoll und von den Dokumenten aufbewahren (Art. 4 Nr. 5 DSGVO).");
+  lines.push("");
+  for (const entry2 of entries) {
+    if (!entry2.pii || entry2.pii.mapping.length === 0) continue;
+    lines.push("=".repeat(72));
+    lines.push(`Datei:    ${entry2.file}`);
+    for (const item of entry2.pii.mapping) lines.push(`  ${item.token.padEnd(20)} ${PII_LABELS[item.category].padEnd(30)} ${item.original}`);
+    lines.push("");
+  }
+  if (lines.length === 4) lines.push("Keine Platzhalter vergeben.");
+  return lines.join("\n");
+}
+var DEFAULT_OPTIONS, OOXML_EXT, ODF_EXT, OLE2_EXT, IMAGE_EXT, MEDIA_EXT, SUPPORTED_EXTENSIONS2, officeFields, NAME_KEYS, piiStep, hasMapping;
 var init_clean = __esm({
   "lib/clean.ts"() {
     "use strict";
@@ -3796,9 +4780,12 @@ var init_clean = __esm({
     init_officeMetadata();
     init_ooxmlDeepClean();
     init_ooxmlPackage();
+    init_ooxmlDeepClean();
     init_odf();
     init_pdf();
     init_rtf();
+    init_pii();
+    init_piiDocument();
     init_ole2();
     init_imageMeta();
     init_mediaMeta();
@@ -3807,7 +4794,8 @@ var init_clean = __esm({
       deep: DEFAULT_DEEP_OPTIONS,
       odf: DEFAULT_ODF_CLEAN,
       pdf: DEFAULT_PDF_CLEAN,
-      rtf: DEFAULT_RTF_CLEAN
+      rtf: DEFAULT_RTF_CLEAN,
+      pii: DEFAULT_PII_CLEAN
     };
     OOXML_EXT = [".docx", ".docm", ".dotx", ".dotm", ".xlsx", ".xlsm", ".xltx", ".xltm", ".pptx", ".pptm", ".potx", ".ppsx", ".ppsm"];
     ODF_EXT = [".odt", ".ods", ".odp", ".odg", ".otm", ".ott", ".ots", ".otp"];
@@ -3822,6 +4810,9 @@ var init_clean = __esm({
       hint: field.hint,
       group: field.part === "core" ? "Dokumenteigenschaften" : "Erweiterte Eigenschaften"
     }));
+    NAME_KEYS = ["creator", "lastModifiedBy", "manager", "initial-creator", "printed-by", "author", "operator", "Author"];
+    piiStep = (where, replaced, remove) => `${remove ? "Gel\xF6scht" : "Pseudonymisiert"} ${where}: ${describeCounts(replaced)}`;
+    hasMapping = (entries) => entries.some((entry2) => (entry2.pii?.mapping.length ?? 0) > 0);
   }
 });
 

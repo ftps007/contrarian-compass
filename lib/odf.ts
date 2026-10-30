@@ -153,6 +153,12 @@ export function scanOdf(entries: ZipEntry[]): { id: string; label: string; detai
   return findings
 }
 
+/** Names of people recorded in comments and tracked changes. */
+export function collectOdfAuthors(entries: ZipEntry[]): string[] {
+  const content = textOf(entries, 'content.xml') ?? ''
+  return Array.from(new Set(Array.from(content.matchAll(/<dc:creator>([^<]+)<\/dc:creator>/g)).map((m) => m[1].trim())))
+}
+
 export function cleanOdf(entries: ZipEntry[], options: OdfCleanOptions): string[] {
   const steps: string[] = []
 

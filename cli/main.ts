@@ -18,55 +18,22 @@ if (!globals.DOMParser) globals.DOMParser = DOMParser
 if (!globals.XMLSerializer) globals.XMLSerializer = XMLSerializer
 
 import {
-  DEFAULT_OPTIONS,
   SUPPORTED_EXTENSIONS,
+  buildMappingText,
   buildReportText,
   cleanFile,
+  hasMapping,
   loadFile,
   type Options,
   type ReportEntry,
 } from '../lib/clean'
+import { PROFILES as SHARED_PROFILES, mergeOptions } from '../lib/profiles'
+import { parseNameList } from '../lib/pii'
 
-// ---------------------------------------------------------------------------
-// Profiles — "policies" that decide what is switched on, in one place
-// ---------------------------------------------------------------------------
-
-const on = <T extends object>(options: T): T =>
-  Object.fromEntries(Object.keys(options).map((key) => [key, true])) as T
-
-export const PROFILES: Record<string, { description: string; options: Options; clearAll?: boolean }> = {
-  standard: {
-    description: 'Ausgewogen: Metadaten bereinigen, Inhalte unangetastet lassen',
-    options: DEFAULT_OPTIONS,
-  },
-  streng: {
-    description: 'Alles entfernen, was entfernt werden kann — inklusive Inhalten wie Notizen und ausgeblendeten Blättern',
-    options: {
-      base: on(DEFAULT_OPTIONS.base),
-      deep: on(DEFAULT_OPTIONS.deep),
-      odf: on(DEFAULT_OPTIONS.odf),
-      pdf: on(DEFAULT_OPTIONS.pdf),
-      rtf: on(DEFAULT_OPTIONS.rtf),
-    },
-    clearAll: true,
-  },
-  weitergabe: {
-    description: 'Für den Versand nach außen: Namen anonymisieren, Notizen und Verknüpfungen entfernen',
-    options: {
-      base: { ...DEFAULT_OPTIONS.base, stripCustomProps: true, stripComments: true },
-      deep: {
-        ...DEFAULT_OPTIONS.deep,
-        anonymizeAuthors: true,
-        removeSpeakerNotes: true,
-        removeChartWorkbooks: true,
-        removeMacros: true,
-      },
-      odf: { ...DEFAULT_OPTIONS.odf, anonymizeAuthors: true },
-      pdf: DEFAULT_OPTIONS.pdf,
-      rtf: { ...DEFAULT_OPTIONS.rtf, anonymizeAuthors: true },
-    },
-  },
-}
+// Same profiles as the app — one definition, three front ends.
+export const PROFILES: Record<string, { description: string; options: Options; clearAll?: boolean }> = Object.fromEntries(
+  SHARED_PROFILES.map((profile) => [profile.key, { description: profile.description, options: profile.options, clearAll: profile.clearAll }])
+)
 
 // ---------------------------------------------------------------------------
 // Arguments
@@ -86,6 +53,10 @@ interface Args {
   scanOnly: boolean
   clearAll: boolean
   values: Record<string, string>
+  /** Names to treat as personal data; switches the DSGVO replacement on. */
+  names: string[]
+  gdpr: boolean
+  mappingPath?: string
   help: boolean
 }
 
@@ -101,6 +72,8 @@ function parseArgs(argv: string[]): Args {
     scanOnly: false,
     clearAll: false,
     values: {},
+    names: [],
+    gdpr: false,
     help: false,
   }
 
@@ -149,6 +122,16 @@ function parseArgs(argv: string[]): Args {
       case '--alles-leeren':
         args.clearAll = true
         break
+      case '--dsgvo':
+        args.gdpr = true
+        break
+      case '--namen':
+        args.names.push(...parseNameList(next() ?? ''))
+        args.gdpr = true
+        break
+      case '--zuordnung':
+        args.mappingPath = next()
+        break
       case '--setzen': {
         const pair = next() ?? ''
         const at = pair.indexOf('=')
@@ -169,9 +152,15 @@ const HELP = `Metadaten-Bereinigung
   metadaten-clean [Optionen] <Datei|Ordner> ...
 
 Optionen
-  --profil <name>        standard | streng | weitergabe   (Vorgabe: standard)
+  --profil <name>        standard | weitergabe | dsgvo | streng   (Vorgabe: standard)
   --profil-datei <pfad>  Eigenes Profil als JSON-Datei (darf unter "values"
                          auch eine Vorlage für alle Dateien enthalten)
+  --dsgvo                Personenbezogene Daten in Eigenschaften und Text durch
+                         Platzhalter ersetzen (zusätzlich zum gewählten Profil)
+  --namen "A, B"         Namen, die überall als personenbezogen gelten
+                         (schaltet --dsgvo ein; mehrfach möglich)
+  --zuordnung <datei>    Zuordnungsliste Platzhalter → Original schreiben
+                         (vertraulich, getrennt aufbewahren)
   --ziel <ordner>        Ergebnisse dorthin schreiben
   --ersetzen             Dateien an Ort und Stelle überschreiben
   --rekursiv             Unterordner mitnehmen
@@ -223,6 +212,8 @@ function targetPath(source: string, args: Args): string {
 }
 
 async function loadProfile(args: Args): Promise<{ options: Options; clearAll: boolean }> {
+  let options: Options
+  let clearAll: boolean
   if (args.profilePath) {
     const raw = JSON.parse(await readFile(resolve(args.profilePath), 'utf8'))
     // A profile may carry a template: values written to every file, with
@@ -230,21 +221,22 @@ async function loadProfile(args: Args): Promise<{ options: Options; clearAll: bo
     if (raw.values && typeof raw.values === 'object') {
       args.values = { ...raw.values, ...args.values }
     }
-    return {
-      options: {
-        base: { ...DEFAULT_OPTIONS.base, ...raw.base },
-        deep: { ...DEFAULT_OPTIONS.deep, ...raw.deep },
-        odf: { ...DEFAULT_OPTIONS.odf, ...raw.odf },
-        pdf: { ...DEFAULT_OPTIONS.pdf, ...raw.pdf },
-        rtf: { ...DEFAULT_OPTIONS.rtf, ...raw.rtf },
-      },
-      clearAll: Boolean(raw.clearAll),
-    }
+    options = mergeOptions(raw)
+    clearAll = Boolean(raw.clearAll)
+  } else {
+    const profile = PROFILES[args.profile]
+    if (!profile) throw new Error(`Unbekanntes Profil "${args.profile}". Verfügbar: ${Object.keys(PROFILES).join(', ')}`)
+    options = profile.options
+    clearAll = Boolean(profile.clearAll)
   }
 
-  const profile = PROFILES[args.profile]
-  if (!profile) throw new Error(`Unbekanntes Profil "${args.profile}". Verfügbar: ${Object.keys(PROFILES).join(', ')}`)
-  return { options: profile.options, clearAll: Boolean(profile.clearAll) }
+  if (args.gdpr || args.names.length > 0) {
+    options = {
+      ...options,
+      pii: { ...options.pii, enabled: true, knownNames: [...options.pii.knownNames, ...args.names] },
+    }
+  }
+  return { options, clearAll }
 }
 
 // ---------------------------------------------------------------------------
@@ -258,7 +250,7 @@ async function processFile(
   clearAll: boolean
 ): Promise<ReportEntry> {
   const bytes = new Uint8Array(await readFile(path))
-  const file = await loadFile(path.split('/').pop() ?? path, bytes)
+  const file = await loadFile(path.split('/').pop() ?? path, bytes, options.pii)
 
   const entry: ReportEntry = {
     file: path,
@@ -296,6 +288,7 @@ async function processFile(
   entry.sha256After = result.sha256After
   entry.steps = result.steps
   entry.remaining = result.remaining
+  entry.pii = result.pii
   return entry
 }
 
@@ -401,6 +394,14 @@ export async function main(argv: string[]): Promise<number> {
   if (args.reportPath) {
     await writeFile(resolve(args.reportPath), report, 'utf8')
     if (!args.json) console.log(`\nProtokoll: ${resolve(args.reportPath)}`)
+  }
+  if (hasMapping(entries)) {
+    if (args.mappingPath) {
+      await writeFile(resolve(args.mappingPath), buildMappingText(entries, new Date().toISOString()), 'utf8')
+      if (!args.json) console.log(`Zuordnungsliste (vertraulich): ${resolve(args.mappingPath)}`)
+    } else if (!args.json) {
+      console.log('\nHinweis: Platzhalter wurden vergeben. Mit --zuordnung <datei> lässt sich die Zuordnungsliste sichern; ohne sie ist die Ersetzung nicht umkehrbar.')
+    }
   }
   if (args.json) console.log(JSON.stringify({ entries }, null, 2))
 

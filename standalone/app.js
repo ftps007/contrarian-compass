@@ -9,14 +9,17 @@
 import {
   DEFAULT_OPTIONS,
   SUPPORTED_EXTENSIONS,
+  buildMappingText,
   buildReportText,
   cleanFile,
+  hasMapping,
   loadFile,
   toW3CDTF,
 } from '../lib/clean'
 import { OPTION_GROUPS, PROFILES, profileByKey } from '../lib/profiles'
 import { KIND_LABELS, applyTemplate, templateFrom, templateSummary } from '../lib/template'
 import { toLocalInput } from '../lib/officeMetadata'
+import { GDPR_RESPONSIBILITIES, describeCounts, parseNameList, totalCount } from '../lib/pii'
 import { writeZip } from '../lib/zip'
 
 const state = {
@@ -28,7 +31,12 @@ const state = {
   templates: {},
   /** Whether applying the Office template also copies the custom properties. */
   templateCustomProps: false,
+  /** Free-text list of names for the DSGVO replacement. */
+  nameList: '',
 }
+
+/** The options as used for a run: the name list is typed as text and parsed here. */
+const effectiveOptions = () => ({ ...state.options, pii: { ...state.options.pii, knownNames: parseNameList(state.nameList) } })
 
 const $ = (id) => document.getElementById(id)
 
@@ -475,9 +483,34 @@ function renderOptions() {
             ])
           })
         ),
+        ...(group.group === 'pii' ? gdprExtras() : []),
       ])
     )
   )
+}
+
+/** Name list and the honest note under the DSGVO switches. */
+function gdprExtras() {
+  const names = el('textarea', { rows: '3', placeholder: 'Max Mustermann, Erika Musterfrau', id: 'pii-names' })
+  names.value = state.nameList
+  names.addEventListener('input', () => (state.nameList = names.value))
+  return [
+    el('div', { class: 'field wide' }, [
+      el('label', { text: 'Eigene Namensliste', for: 'pii-names' }),
+      names,
+      el('p', {
+        class: 'hint',
+        text: 'Namen, die überall ersetzt werden sollen — durch Komma oder Zeilenumbruch getrennt. Die Namen aus den Dokumenteigenschaften und Kommentaren kommen automatisch dazu.',
+      }),
+    ]),
+    el('p', {
+      class: 'message info inline',
+      text:
+        'Kein Werkzeug kann ein Dokument „100 % DSGVO-konform" machen. Diese Funktion ist eine technische Maßnahme nach Art. 32: ' +
+        'Sie findet und ersetzt typische personenbezogene Angaben und protokolliert das. Rechtsgrundlage, Zweck, Speicherdauer und ' +
+        'Betroffenenrechte bleiben Ihre Prüfung — das Protokoll listet sie auf.',
+    }),
+  ]
 }
 
 function renderResults() {
@@ -500,7 +533,19 @@ function renderResults() {
             class: 'hash',
             text: `SHA-256 vorher ${item.result.sha256Before.slice(0, 16)}… · nachher ${item.result.sha256After.slice(0, 16)}…`,
           }),
-          el('ul', {}, item.result.steps.map((step) => el('li', { text: step }))),
+          el('ul', {}, item.result.steps.map((step) => el('li', { text: step })))
+        )
+        if (item.result.pii) {
+          const total = totalCount(item.result.pii.replaced)
+          children.push(
+            el('p', {
+              class: 'hint',
+              text: `DSGVO-Bereinigung: ${total === 0 ? 'keine personenbezogenen Daten in Eigenschaften und Inhalt gefunden.' : `${total} Stelle(n) ersetzt — ${describeCounts(item.result.pii.replaced)}.`}`,
+            }),
+            ...item.result.pii.notes.map((note) => el('p', { class: 'warn-text', text: `Hinweis: ${note}` }))
+          )
+        }
+        children.push(
           el('p', {
             class: item.result.remaining.length === 0 ? 'ok-text' : 'warn-text',
             text:
@@ -513,7 +558,28 @@ function renderResults() {
       return el('div', { class: 'result' }, children)
     })
   )
+  const responsibilities = $('responsibilities')
+  responsibilities.classList.toggle('hidden', !done.some((item) => item.result?.pii))
+  responsibilities.replaceChildren(
+    el('h3', { text: 'In Ihrer Verantwortung bleibt' }),
+    el('ul', {}, GDPR_RESPONSIBILITIES.map((text) => el('li', { text })))
+  )
 }
+
+const reportEntries = () =>
+  state.items.map((item) => ({
+    file: item.result?.fileName ?? item.file.name,
+    kind: item.file.kind,
+    sizeBefore: item.file.size,
+    sizeAfter: item.result?.bytes.length ?? item.file.size,
+    sha256Before: item.file.sha256,
+    sha256After: item.result?.sha256After ?? item.file.sha256,
+    findingsBefore: item.file.findings,
+    steps: item.result?.steps ?? [],
+    remaining: item.result?.remaining ?? item.file.findings,
+    pii: item.result?.pii,
+    error: item.result?.error ?? item.file.error,
+  }))
 
 function render() {
   const hasFiles = state.items.length > 0
@@ -543,6 +609,8 @@ function render() {
   $('download').textContent = cleaned.length === 1 ? `Datei ${verb}` : `Alle als ZIP ${verb}`
   $('report').classList.toggle('hidden', state.items.every((item) => !item.result))
   $('report').textContent = `Protokoll ${verb}`
+  $('mapping').classList.toggle('hidden', !hasMapping(reportEntries()))
+  $('mapping').textContent = `Zuordnungsliste ${verb} (vertraulich)`
 }
 
 // ---------------------------------------------------------------------------
@@ -583,8 +651,9 @@ function wireActions() {
     button.disabled = true
     setMessage('info', 'Dateien werden bereinigt…')
     try {
+      const options = effectiveOptions()
       for (const item of state.items) {
-        item.result = await cleanFile(item.file, item.values, item.customProps, state.options)
+        item.result = await cleanFile(item.file, item.values, item.customProps, options)
       }
       const failed = state.items.filter((item) => item.result?.error).length
       const wohin = runsNative() ? 'Unten sichern.' : 'Unten herunterladen.'
@@ -623,20 +692,13 @@ function wireActions() {
   })
 
   $('report').addEventListener('click', () => {
-    const entries = state.items.map((item) => ({
-      file: item.result?.fileName ?? item.file.name,
-      kind: item.file.kind,
-      sizeBefore: item.file.size,
-      sizeAfter: item.result?.bytes.length ?? item.file.size,
-      sha256Before: item.file.sha256,
-      sha256After: item.result?.sha256After ?? item.file.sha256,
-      findingsBefore: item.file.findings,
-      steps: item.result?.steps ?? [],
-      remaining: item.result?.remaining ?? item.file.findings,
-      error: item.result?.error ?? item.file.error,
-    }))
-    const text = buildReportText(entries, new Date().toLocaleString('de-DE'))
+    const text = buildReportText(reportEntries(), new Date().toLocaleString('de-DE'))
     download(new TextEncoder().encode(text), 'metadaten-protokoll.txt', 'text/plain')
+  })
+
+  $('mapping').addEventListener('click', () => {
+    const text = buildMappingText(reportEntries(), new Date().toLocaleString('de-DE'))
+    download(new TextEncoder().encode(text), 'zuordnungsliste-vertraulich.txt', 'text/plain')
   })
 
   $('custom-add').addEventListener('click', () => {

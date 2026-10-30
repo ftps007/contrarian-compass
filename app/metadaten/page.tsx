@@ -4,8 +4,10 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   DEFAULT_OPTIONS,
   SUPPORTED_EXTENSIONS,
+  buildMappingText,
   buildReportText,
   cleanFile,
+  hasMapping,
   loadFile,
   toW3CDTF,
   type CleanResult,
@@ -19,6 +21,7 @@ import {
 import { OPTION_GROUPS, PROFILES, profileByKey } from '@/lib/profiles'
 import { KIND_LABELS, applyTemplate, templateFrom, templateSummary, type Template } from '@/lib/template'
 import { toLocalInput, type CustomProp } from '@/lib/officeMetadata'
+import { GDPR_RESPONSIBILITIES, describeCounts, parseNameList, totalCount } from '@/lib/pii'
 import { writeZip } from '@/lib/zip'
 
 interface Item {
@@ -41,6 +44,7 @@ export default function MetadatenPage() {
   const [options, setOptions] = useState<Options>(DEFAULT_OPTIONS)
   const [templates, setTemplates] = useState<Partial<Record<FileKind, Template>>>({})
   const [templateCustomProps, setTemplateCustomProps] = useState(false)
+  const [nameList, setNameList] = useState('')
   const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<{ kind: 'info' | 'error'; text: string } | null>(null)
@@ -133,13 +137,17 @@ export default function MetadatenPage() {
     setProfileKey('eigenes')
   }
 
+  /** The options as used for a run: the name list is typed as text and parsed here. */
+  const effectiveOptions = (): Options => ({ ...options, pii: { ...options.pii, knownNames: parseNameList(nameList) } })
+
   const cleanAll = async () => {
     if (items.length === 0) return
     setBusy('Dateien werden bereinigt…')
     setMessage(null)
     const done: Item[] = []
+    const run = effectiveOptions()
     for (const item of items) {
-      const result = await cleanFile(item.file, item.values, item.customProps, options)
+      const result = await cleanFile(item.file, item.values, item.customProps, run)
       done.push({ ...item, result })
     }
     setItems(done)
@@ -195,12 +203,18 @@ export default function MetadatenPage() {
       findingsBefore: item.file.findings,
       steps: item.result?.steps ?? [],
       remaining: item.result?.remaining ?? item.file.findings,
+      pii: item.result?.pii,
       error: item.result?.error ?? item.file.error,
     }))
 
   const downloadReport = () => {
     const text = buildReportText(reportEntries(), new Date().toLocaleString('de-DE'))
     download(new TextEncoder().encode(text), 'metadaten-protokoll.txt', 'text/plain')
+  }
+
+  const downloadMapping = () => {
+    const text = buildMappingText(reportEntries(), new Date().toLocaleString('de-DE'))
+    download(new TextEncoder().encode(text), 'zuordnungsliste-vertraulich.txt', 'text/plain')
   }
 
   /** One file per format, used to know which fields a template offers. */
@@ -528,6 +542,29 @@ export default function MetadatenPage() {
                     </span>
                   </label>
                 ))}
+                {group.group === 'pii' && (
+                  <>
+                    <label className="block pt-2">
+                      <span className="block text-sm font-medium text-stone-700">Eigene Namensliste</span>
+                      <span className="block text-sm text-stone-500">
+                        Namen, die überall ersetzt werden sollen — durch Komma oder Zeilenumbruch getrennt. Die Namen aus den
+                        Dokumenteigenschaften und Kommentaren kommen automatisch dazu.
+                      </span>
+                      <textarea
+                        value={nameList}
+                        onChange={(e) => setNameList(e.target.value)}
+                        rows={3}
+                        placeholder="Max Mustermann, Erika Musterfrau"
+                        className="mt-2 w-full rounded-md border border-stone-300 px-3 py-2 text-sm focus:border-amber-600 focus:outline-none"
+                      />
+                    </label>
+                    <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                      Kein Werkzeug kann ein Dokument „100 % DSGVO-konform" machen. Diese Funktion ist eine technische Maßnahme
+                      nach Art. 32: Sie findet und ersetzt typische personenbezogene Angaben und protokolliert das. Rechtsgrundlage,
+                      Zweck, Speicherdauer und Betroffenenrechte bleiben Ihre Prüfung — das Protokoll listet sie auf.
+                    </p>
+                  </>
+                )}
               </div>
             </section>
           ))}
@@ -555,6 +592,15 @@ export default function MetadatenPage() {
                 Protokoll herunterladen
               </button>
             )}
+            {hasMapping(reportEntries()) && (
+              <button
+                onClick={downloadMapping}
+                title="Platzhalter → Original. Getrennt vom Dokument und vom Protokoll aufbewahren."
+                className="text-sm text-red-800 underline hover:text-red-900"
+              >
+                Zuordnungsliste herunterladen (vertraulich)
+              </button>
+            )}
           </div>
 
           {items.some((item) => item.result) && <ResultList items={items} />}
@@ -570,6 +616,10 @@ export default function MetadatenPage() {
           <li>Nachverfolgte Änderungen: die müssen in Word bzw. LibreOffice angenommen werden.</li>
           <li>Eingebettete Fremddokumente (OLE) und SmartArt-Datenmodelle — dort nur Hinweis, keine Automatik.</li>
           <li>Verschlüsselte PDFs werden bewusst abgelehnt statt beschädigt.</li>
+          <li>
+            DSGVO-Konformität bescheinigen: Die DSGVO-Bereinigung ersetzt erkannte personenbezogene Daten und protokolliert
+            das. Ob die Verarbeitung insgesamt rechtmäßig ist, entscheidet sich außerhalb der Datei.
+          </li>
         </ul>
         <p className="mt-3 text-sm text-stone-600">
           Rückdatierung fällt in forensischen Prüfungen regelmäßig auf und ist im rechtlichen Kontext strafbar.
@@ -731,6 +781,19 @@ function ResultList({ items }: { items: Item[] }) {
                       <li key={i}>{step}</li>
                     ))}
                   </ul>
+                  {item.result!.pii && (
+                    <p className="mt-2 text-sm text-stone-700">
+                      DSGVO-Bereinigung:{' '}
+                      {totalCount(item.result!.pii.replaced) === 0
+                        ? 'keine personenbezogenen Daten in Eigenschaften und Inhalt gefunden.'
+                        : `${totalCount(item.result!.pii.replaced)} Stelle(n) ersetzt — ${describeCounts(item.result!.pii.replaced)}.`}
+                      {item.result!.pii.notes.map((note, i) => (
+                        <span key={i} className="block text-amber-800">
+                          Hinweis: {note}
+                        </span>
+                      ))}
+                    </p>
+                  )}
                   <p className="mt-2 text-sm">
                     {item.result!.remaining.length === 0 ? (
                       <span className="text-green-700">Nachkontrolle: keine Funde mehr.</span>
@@ -745,6 +808,16 @@ function ResultList({ items }: { items: Item[] }) {
             </div>
           ))}
       </div>
+      {items.some((item) => item.result?.pii) && (
+        <div className="mt-6 rounded-md border border-stone-300 bg-stone-50 p-4">
+          <h3 className="mb-2 font-medium text-stone-800">In Ihrer Verantwortung bleibt</h3>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-stone-600">
+            {GDPR_RESPONSIBILITIES.map((item, i) => (
+              <li key={i}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   )
 }

@@ -203,7 +203,7 @@ export function scanRtf(text: string): RtfFinding[] {
   return findings
 }
 
-function collectRevisionAuthors(text: string): string[] {
+export function collectRevisionAuthors(text: string): string[] {
   const table = findGroup(text, '*\\revtbl')
   const authors = new Set<string>()
   if (table) {

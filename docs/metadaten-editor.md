@@ -81,16 +81,78 @@ Platzhalter ab — über Dokumenteigenschaften, Kommentare, Änderungsverfolgung
 hinweg. Kommentare bleiben damit einander zuordenbar, ohne die Personen zu benennen. Die Zuordnung
 steht im Protokoll.
 
+## DSGVO-Bereinigung
+
+Vorweg, weil es darauf ankommt: **Kein Werkzeug kann ein Dokument „100 % DSGVO-konform" machen.**
+Konformität ist eine Eigenschaft der Verarbeitung — Rechtsgrundlage, Zweck, Speicherdauer,
+Betroffenenrechte, Verträge — und nicht einer Datei. Was ein Werkzeug leisten kann, ist die
+technische Maßnahme nach Art. 32: personenbezogene Daten finden, ersetzen und das nachweisbar
+protokollieren. Genau das tut diese Funktion, und ihr Protokoll sagt ausdrücklich, was danach noch
+in der Verantwortung des Verantwortlichen liegt.
+
+**Was gefunden wird** — in den Dokumenteigenschaften und im Text:
+
+| Kategorie | Erkennung |
+| --- | --- |
+| Personennamen | Namen aus den Eigenschaften (Autor, Bearbeiter, Vorgesetzter), aus Kommentaren und Änderungsverfolgung, nach Anrede oder Titel („Frau Dr. …", „Herrn …"), unter Grußformeln sowie eine eigene Namensliste |
+| E-Mail-Adressen | auch in Hyperlink-Zielen (`mailto:`) und Feldfunktionen |
+| Telefonnummern | internationale und nationale Schreibweisen mit mindestens sieben Ziffern |
+| Postanschriften | Straße mit Hausnummer, Postleitzahl und Ort |
+| Geburtsdaten | Datumsangaben neben „geb.", „Geburtsdatum", „date of birth" |
+| IBAN, Kartennummern | nur mit gültiger Prüfsumme (ISO 7064 bzw. Luhn) — Rechnungsnummern bleiben in Ruhe |
+| Steuer-ID, Sozialversicherungsnummer | deutsche Formate mit gültiger Prüfziffer |
+| IP-Adressen | IPv4 und IPv6 |
+
+**Wie ersetzt wird.** Jede Fundstelle bekommt einen nummerierten Platzhalter — `[Person 1]`,
+`[E-Mail 2]`, `[IBAN 1]` — und dieselbe Angabe immer denselben, über Eigenschaften, Text,
+Kommentare, Notizen, Alternativtexte und Hyperlinks hinweg. Das ist Pseudonymisierung im Sinne von
+Art. 4 Nr. 5: Das Dokument bleibt lesbar und in sich schlüssig, nennt aber niemanden mehr. Wer
+stattdessen ersatzlos löschen will, schaltet „Löschen statt Platzhalter" ein.
+
+Die eigentliche Schwierigkeit ist nicht das Erkennen, sondern dass Word eine E-Mail-Adresse
+routinemäßig auf mehrere Textläufe verteilt (`max@` + `fir` + `ma.de`). Deshalb wird der Text eines
+Absatzes erst zusammengesetzt, dann geprüft, und der Platzhalter über die Laufgrenzen hinweg
+zurückgeschrieben — der erste Lauf bekommt den Platzhalter, die anderen verlieren ihren Anteil. Die
+Formatierung bleibt erhalten. Das gilt für Word (Text, Kopf- und Fußzeilen, Fuß- und Endnoten,
+Kommentare, Textfelder, gelöschter Text in Änderungen), Excel (Zeichenkettentabelle inklusive
+Rich-Text, Inline-Zellen, Kommentare), PowerPoint (Folien, Notizen, Kommentare), OpenDocument
+(`content.xml`, `styles.xml`, Anmerkungen) und RTF (mit Steuerwörtern, `\'hh`-Escapes und Unicode
+zwischen den Buchstaben).
+
+**PDF** wird geprüft, aber nicht verändert: Der Seitentext wird gelesen, soweit die Schriftkodierung
+das zulässt, und die Funde stehen im Befund mit dem Vermerk, dass sie im Quelldokument zu bereinigen
+sind. Die Eigenschaften werden auch beim PDF pseudonymisiert. Schriften mit CID-Kodierung liefern
+keine lesbaren Zeichen; das wird als eigener Fund gemeldet.
+
+**Zuordnungsliste.** Platzhalter → Original wird als eigene Datei ausgegeben
+(`zuordnungsliste-vertraulich.txt`, CLI `--zuordnung`), nie im Protokoll. Sie ist der Schlüssel zur
+Pseudonymisierung und damit selbst ein personenbezogenes Datum: getrennt aufbewahren, zugriffsschützen,
+mit Löschfrist versehen — oder vernichten, wenn keine Rückführung nötig ist.
+
+**Protokoll.** Zusätzlich zu Funden, Schritten, Hashes und Nachkontrolle enthält es je Datei die
+Zahl der ersetzten Stellen nach Kategorie und am Ende den Abschnitt „In Ihrer Verantwortung bleibt":
+Rechtsgrundlage, Zweckbindung, Vollständigkeit der Erkennung, Pseudonymisierung ≠ Anonymisierung,
+Speicherdauer, Betroffenenrechte, Auftragsverarbeitung, Verzeichnis. Die Kopfzeile sagt, dass das
+Protokoll eine technische Maßnahme belegt und keine Konformität bescheinigt.
+
+**Grenzen der Erkennung**, ehrlich: Namen ohne Anrede, die weder in den Eigenschaften noch in der
+Namensliste stehen, werden nicht gefunden. Namen in Bildern, eingebetteten Objekten und
+Diagrammdaten ebenfalls nicht (letztere entfernt das Profil mit dem Diagramm-Schalter). Freie
+Beschreibungen („der Kollege aus dem dritten Stock") sind keine Muster. Das Protokoll weist auf die
+Handprüfung hin.
+
 ## Profile
 
 | Profil | Wirkung |
 | --- | --- |
 | `standard` | Metadaten bereinigen, Inhalte unangetastet lassen |
 | `weitergabe` | Zusätzlich Namen anonymisieren, Notizen, Diagrammdaten und Makros entfernen |
-| `streng` | Alles entfernen, was entfernt werden kann, und alle Felder leeren |
+| `dsgvo` | Personenbezogene Daten in Eigenschaften und Text pseudonymisieren, Namen anonymisieren, versteckte Inhalte (Blätter, Zeilen, Folien, Notizen, Pivot-Caches, Diagrammdaten, Anmerkungen) entfernen |
+| `streng` | Alles entfernen, was entfernt werden kann, Text pseudonymisieren und alle Felder leeren |
 
 Eigene Profile als JSON-Datei mit `--profil-datei`; die Struktur entspricht `Options` aus
-`lib/clean.ts` (`base`, `deep`, `odf`, `pdf`, `rtf`, dazu `clearAll`).
+`lib/clean.ts` (`base`, `deep`, `odf`, `pdf`, `rtf`, `pii`, dazu `clearAll`). Unter `pii` stehen
+`enabled`, `remove`, ein Schalter je Kategorie und `knownNames` als Liste.
 
 ## Kommandozeile
 
@@ -101,11 +163,15 @@ node cli/metadaten-clean.mjs --hilfe
 node cli/metadaten-clean.mjs --nur-bericht --rekursiv ~/Dokumente
 node cli/metadaten-clean.mjs --profil weitergabe --ziel ~/Ausgehend ~/Entwürfe
 node cli/metadaten-clean.mjs --ueberwachen --intervall 30 ~/Ausgehend
+node cli/metadaten-clean.mjs --profil dsgvo --namen "Max Mustermann, Erika Musterfrau" \
+    --bericht protokoll.txt --zuordnung zuordnung-vertraulich.txt ~/Akte
 ```
 
 `--nur-bericht` verändert nichts und listet nur die Funde. `--ueberwachen` beobachtet Ordner und
-bereinigt neue oder geänderte Dateien automatisch. `--json` gibt alles maschinenlesbar aus, der
-Rückgabewert ist 1, sobald eine Datei nicht verarbeitet werden konnte.
+bereinigt neue oder geänderte Dateien automatisch. `--dsgvo` schaltet die Pseudonymisierung zu
+jedem Profil dazu, `--namen` ergänzt die Namensliste (und schaltet sie mit ein), `--zuordnung`
+schreibt die vertrauliche Zuordnungsliste. `--json` gibt alles maschinenlesbar aus, der Rückgabewert
+ist 1, sobald eine Datei nicht verarbeitet werden konnte.
 
 ## Nachweisbarkeit
 
@@ -155,6 +221,8 @@ Ehrlich benannt statt stillschweigend übergangen:
   unangetastet, weil ein Beschneiden die anderen Verwendungen verfälschen würde.
 - **Außerhalb der Datei** bleibt alles, woran kein Editor herankommt: Zeitstempel des Dateisystems,
   Versionsverlauf in OneDrive/SharePoint/DMS, bereits versendete Kopien.
+- **DSGVO-Konformität** lässt sich nicht bescheinigen, nur die technische Bereinigung belegen —
+  siehe den Abschnitt oben.
 
 Bearbeitete Metadaten sind kein sauberer, sondern ein bearbeiteter Zustand. Rückdatierung fällt in
 forensischen Prüfungen regelmäßig auf und ist im rechtlichen Kontext strafbar.
@@ -173,6 +241,8 @@ lib/odf.ts              OpenDocument
 lib/rtf.ts              RTF
 lib/ole2.ts             .doc/.xls/.ppt
 lib/mediaMeta.ts        MP3/MP4
+lib/pii.ts              Personenbezogene Daten erkennen, prüfen, pseudonymisieren
+lib/piiDocument.ts      Textersatz über Laufgrenzen in OOXML, ODF und RTF
 lib/clean.ts            Dachmodul: Format erkennen, bereinigen, Bericht
 lib/profiles.ts         Profile und Beschriftungen der Schalter
 app/metadaten/page.tsx  Web-Oberfläche

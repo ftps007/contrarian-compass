@@ -977,3 +977,113 @@ function serializeString(value: string): string {
   }
   return `(${value.replace(/[\\()]/g, (c) => '\\' + c)})`
 }
+
+// ---------------------------------------------------------------------------
+// Text extraction — for checking content, never for rewriting it
+// ---------------------------------------------------------------------------
+
+export interface PdfText {
+  text: string
+  /** True when parts of the text use a font encoding that cannot be read here. */
+  partial: boolean
+}
+
+/**
+ * The visible text of a PDF, as far as it can be read without font tables:
+ * literal strings of the text operators in every content and form stream.
+ * Strings in CID fonts (Identity-H) come out as glyph indices and are left
+ * out; the result then says so.
+ */
+export async function extractPdfText(bytes: Uint8Array): Promise<PdfText> {
+  const doc = await parsePdf(bytes)
+  const pieces: string[] = []
+  let partial = false
+
+  for (const value of Array.from(doc.objects.values())) {
+    if (value.t !== 'stream') continue
+    const type = value.dict.get('Type')
+    const subtype = value.dict.get('Subtype')
+    if (type?.t === 'name' && !['XObject', 'Pattern'].includes(type.v)) continue
+    if (subtype?.t === 'name' && subtype.v === 'Image') continue
+    const filter = value.dict.get('Filter')
+    const filterName = filter?.t === 'name' ? filter.v : filter?.t === 'arr' && filter.v[0]?.t === 'name' ? filter.v[0].v : ''
+    if (filter?.t === 'arr' && filter.v.length > 1) continue
+    if (filterName !== '' && filterName !== 'FlateDecode') continue
+    const data = filterName === 'FlateDecode' ? await inflate(value.data) : value.data
+    if (!data) continue
+    const content = latin1.decode(data)
+    if (!content.includes('BT')) continue
+    const extracted = textFromContentStream(content)
+    if (extracted.partial) partial = true
+    if (extracted.text.trim() !== '') pieces.push(extracted.text)
+  }
+
+  // Annotations and form fields carry their own strings.
+  for (const value of Array.from(doc.objects.values())) {
+    const dict = dictOf(value)
+    if (!dict) continue
+    const type = dict.get('Type')
+    if (type?.t !== 'name' || type.v !== 'Annot') continue
+    for (const key of ['Contents', 'T', 'V', 'RC', 'Subj']) {
+      const entry = dict.get(key)
+      if (entry?.t === 'str' && entry.v) pieces.push(decodePdfText(entry.v))
+    }
+  }
+
+  return { text: pieces.join('\n'), partial }
+}
+
+function textFromContentStream(content: string): PdfText {
+  const out: string[] = []
+  let partial = false
+  const blocks = /BT\b([\s\S]*?)\bET\b/g
+  let block: RegExpExecArray | null
+  while ((block = blocks.exec(content))) {
+    const body = block[1]
+    let line = ''
+    // Strings, hex strings, numbers (kerning inside TJ) and the operators that start a new line.
+    const tokens = /\((?:[^()\\]|\\[\s\S])*\)|<[0-9A-Fa-f\s]*>|-?\d+(?:\.\d+)?|\b(?:T\*|Td|TD|Tm|Tj|TJ|')\b|"/g
+    let token: RegExpExecArray | null
+    let lastNumber = 0
+    while ((token = tokens.exec(body))) {
+      const t = token[0]
+      if (t.startsWith('(')) {
+        line += decodeLiteral(t)
+        lastNumber = 0
+      } else if (t.startsWith('<')) {
+        const decoded = decodeHex(t)
+        if (decoded === null) partial = true
+        else line += decoded
+        lastNumber = 0
+      } else if (/^-?\d/.test(t)) {
+        lastNumber = Number(t)
+        if (lastNumber < -150) line += ' '
+      } else if (t === 'T*' || t === 'Td' || t === 'TD' || t === 'Tm' || t === "'" || t === '"') {
+        if (line !== '') out.push(line)
+        line = ''
+      }
+    }
+    if (line !== '') out.push(line)
+  }
+  return { text: out.join('\n'), partial }
+}
+
+function decodeLiteral(token: string): string {
+  const bytes = new Uint8Array(token.length)
+  for (let i = 0; i < token.length; i++) bytes[i] = token.charCodeAt(i) & 0xff
+  const lexer = new Lexer(bytes, 0)
+  const value = lexer.parse()
+  return value.t === 'str' ? decodePdfText(value.v) : ''
+}
+
+/** Hex strings of simple fonts are bytes of text; those of CID fonts are glyph ids. */
+function decodeHex(token: string): string | null {
+  const hex = token.replace(/[^0-9A-Fa-f]/g, '')
+  let text = ''
+  for (let i = 0; i + 1 < hex.length; i += 2) text += String.fromCharCode(parseInt(hex.substr(i, 2), 16))
+  if (text.startsWith('\xfe\xff')) return decodePdfText(text)
+  const readable = text.replace(/[^\x20-\x7e\xa0-\xff]/g, '').length
+  if (text.length === 0) return ''
+  if (readable / text.length < 0.9) return null
+  return text
+}

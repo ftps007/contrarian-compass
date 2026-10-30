@@ -140,6 +140,12 @@
       .result { margin-bottom: 1.25rem; }
       .result ul { margin: .5rem 0 0; padding-left: 1.25rem; font-size: .875rem; color: var(--stone-600); }
       .hash { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem; color: var(--stone-500); margin: .25rem 0 0; }
+      .message.inline { margin-top: 1rem; }
+      button.link.danger { color: #991b1b; }
+      .responsibilities { margin-top: 1.5rem; border: 1px solid var(--stone-300); background: var(--stone-100); border-radius: .375rem; padding: 1rem; }
+      .responsibilities h3 { margin: 0 0 .5rem; font-size: 1rem; }
+      .responsibilities ul { margin: 0; padding-left: 1.25rem; font-size: .875rem; color: var(--stone-600); }
+      .responsibilities li { margin: .25rem 0; }
       .ok-text { color: #166534; font-size: .875rem; margin-top: .5rem; }
       .warn-text { color: #92400e; font-size: .875rem; margin-top: .5rem; }
       .error-text { color: #991b1b; font-size: .875rem; margin-top: .25rem; }
@@ -207,11 +213,13 @@
           <button id="clean" class="primary">Bereinigen</button>
           <button id="download" class="hidden">Herunterladen</button>
           <button id="report" class="link hidden">Protokoll herunterladen</button>
+          <button id="mapping" class="link danger hidden" title="Platzhalter → Original. Getrennt vom Dokument und vom Protokoll aufbewahren.">Zuordnungsliste herunterladen (vertraulich)</button>
         </div>
 
         <section id="results-section" class="hidden">
           <h2>Protokoll</h2>
           <div id="results"></div>
+          <div id="responsibilities" class="responsibilities hidden"></div>
         </section>
       </div>
 
@@ -224,6 +232,7 @@
           <li>Nachverfolgte Änderungen: die müssen in Word bzw. LibreOffice angenommen werden.</li>
           <li>Eingebettete Fremddokumente (OLE) und SmartArt-Datenmodelle — dort nur Hinweis, keine Automatik.</li>
           <li>Verschlüsselte PDFs werden bewusst abgelehnt statt beschädigt.</li>
+          <li>DSGVO-Konformität bescheinigen: Die DSGVO-Bereinigung ersetzt erkannte personenbezogene Daten und protokolliert das. Ob die Verarbeitung insgesamt rechtmäßig ist, entscheidet sich außerhalb der Datei.</li>
         </ul>
         <p>
           Rückdatierung fällt in forensischen Prüfungen regelmäßig auf und ist im rechtlichen Kontext strafbar.
